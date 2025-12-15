@@ -54,3 +54,16 @@ export async function createDirectSplit(phone) {
     body: JSON.stringify({ phone }),
   });
 }
+
+// Create an expense in a group
+export async function createExpense(groupId, { amount, description, splits }) {
+  return request(`/groups/${groupId}/expenses`, {
+    method: 'POST',
+    body: JSON.stringify({ amount, description, splits }),
+  });
+}
+
+// Get expenses for a group
+export async function getExpenses(groupId) {
+  return request(`/groups/${groupId}/expenses`);
+}

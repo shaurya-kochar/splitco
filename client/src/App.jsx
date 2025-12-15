@@ -7,6 +7,8 @@ import CreateGroup from './pages/CreateGroup';
 import NewSplit from './pages/NewSplit';
 import GroupDetail from './pages/GroupDetail';
 import JoinGroup from './pages/JoinGroup';
+import AddExpense from './pages/AddExpense';
+import SplitExpense from './pages/SplitExpense';
 
 function ProtectedRoute({ children }) {
   const { user, isLoading } = useAuth();
@@ -92,6 +94,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <GroupDetail />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/group/:groupId/add-expense" 
+        element={
+          <ProtectedRoute>
+            <AddExpense />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/group/:groupId/add-expense/split" 
+        element={
+          <ProtectedRoute>
+            <SplitExpense />
           </ProtectedRoute>
         } 
       />
