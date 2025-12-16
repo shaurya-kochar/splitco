@@ -3,8 +3,10 @@ import { authMiddleware } from '../middleware/auth.js';
 import { createGroup, getGroupById, getAllGroups } from '../store/groupStore.js';
 import { addMember, isMember, getGroupMembers, getUserGroups, findDirectGroup } from '../store/memberStore.js';
 import { findUserByPhone, findUserById, findOrCreateUser } from '../store/userStore.js';
-import { createExpense, getExpensesByGroup } from '../store/expenseStore.js';
-import { createExpenseSplits, getSplitsByExpenses, validateSplits } from '../store/expenseSplitStore.js';
+import { createExpense, getExpensesByGroup, getExpenseById, deleteExpense } from '../store/expenseStore.js';
+import { createExpenseSplits, getSplitsByExpenses, validateSplits, deleteSplitsForExpense } from '../store/expenseSplitStore.js';
+import { calculateGroupBalances, getSettlementPlan } from '../store/balanceCalculator.js';
+import { createSettlement, getGroupSettlements } from '../store/settlementStore.js';
 
 const router = Router();
 
@@ -498,6 +500,315 @@ router.get('/:groupId/expenses', authMiddleware, (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to fetch expenses'
+    });
+  }
+});
+
+// GET /groups/:groupId/balances - Get net balances for the group
+router.get('/:groupId/balances', authMiddleware, (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Get all expenses with splits
+    const expenseRecords = getExpensesByGroup(groupId);
+    const expenseIds = expenseRecords.map(e => e.id);
+    const splitsMap = getSplitsByExpenses(expenseIds);
+
+    // Build expenses array with splits for calculation
+    const expenses = expenseRecords.map(expense => ({
+      ...expense,
+      splits: splitsMap.get(expense.id) || []
+    }));
+
+    // Get settlements to factor into balance calculation
+    const settlementRecords = getGroupSettlements(groupId);
+
+    // Calculate balances (including settlements)
+    const balances = calculateGroupBalances(expenses, settlementRecords);
+    const settlements = getSettlementPlan(balances);
+
+    // Build response with user details
+    const balanceDetails = [];
+    for (const [userId, data] of balances.entries()) {
+      const user = findUserById(userId);
+      
+      const owesDetails = [];
+      for (const [creditorId, amount] of data.owes.entries()) {
+        const creditor = findUserById(creditorId);
+        owesDetails.push({
+          userId: creditorId,
+          userName: creditor?.name || creditor?.phone || 'Unknown',
+          amount: Number(amount.toFixed(2))
+        });
+      }
+      
+      const owedByDetails = [];
+      for (const [debtorId, amount] of data.owedBy.entries()) {
+        const debtor = findUserById(debtorId);
+        owedByDetails.push({
+          userId: debtorId,
+          userName: debtor?.name || debtor?.phone || 'Unknown',
+          amount: Number(amount.toFixed(2))
+        });
+      }
+      
+      balanceDetails.push({
+        userId,
+        userName: user?.name || user?.phone || 'Unknown',
+        balance: Number(data.balance.toFixed(2)),
+        owes: owesDetails,
+        owedBy: owedByDetails
+      });
+    }
+
+    res.json({
+      success: true,
+      balances: balanceDetails,
+      currentUserBalance: balances.get(userId) ? Number(balances.get(userId).balance.toFixed(2)) : 0
+    });
+
+  } catch (error) {
+    console.error('Get balances error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to calculate balances'
+    });
+  }
+});
+
+// POST /groups/:groupId/settlements - Record a settlement
+router.post('/:groupId/settlements', authMiddleware, (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { toUserId, amount, method = 'manual' } = req.body;
+    const fromUserId = req.user.id;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, fromUserId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Validate recipient is a member
+    if (!isMember(groupId, toUserId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Recipient is not a member of this group'
+      });
+    }
+
+    // Validate amount
+    if (!amount || typeof amount !== 'number' || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Valid amount is required'
+      });
+    }
+
+    // Cannot settle with yourself
+    if (fromUserId === toUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot settle with yourself'
+      });
+    }
+
+    // Create settlement
+    const settlement = createSettlement({
+      groupId,
+      fromUserId,
+      toUserId,
+      amount,
+      method
+    });
+
+    // Get user details
+    const fromUser = findUserById(fromUserId);
+    const toUser = findUserById(toUserId);
+
+    res.json({
+      success: true,
+      settlement: {
+        id: settlement.id,
+        groupId: settlement.groupId,
+        from: {
+          id: fromUserId,
+          name: fromUser?.name || fromUser?.phone || 'Unknown'
+        },
+        to: {
+          id: toUserId,
+          name: toUser?.name || toUser?.phone || 'Unknown'
+        },
+        amount: settlement.amount,
+        method: settlement.method,
+        createdAt: settlement.createdAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Create settlement error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to record settlement'
+    });
+  }
+});
+
+// GET /groups/:groupId/settlements - Get group settlements
+router.get('/:groupId/settlements', authMiddleware, (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Get settlements
+    const settlementRecords = getGroupSettlements(groupId);
+
+    // Build response with user details
+    const settlements = settlementRecords.map(settlement => {
+      const fromUser = findUserById(settlement.fromUserId);
+      const toUser = findUserById(settlement.toUserId);
+
+      return {
+        id: settlement.id,
+        groupId: settlement.groupId,
+        from: {
+          id: settlement.fromUserId,
+          name: fromUser?.name || fromUser?.phone || 'Unknown'
+        },
+        to: {
+          id: settlement.toUserId,
+          name: toUser?.name || toUser?.phone || 'Unknown'
+        },
+        amount: settlement.amount,
+        method: settlement.method,
+        createdAt: settlement.createdAt
+      };
+    });
+
+    res.json({
+      success: true,
+      settlements
+    });
+
+  } catch (error) {
+    console.error('Get settlements error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch settlements'
+    });
+  }
+});
+
+// DELETE /groups/:groupId/expenses/:expenseId - Delete an expense
+router.delete('/:groupId/expenses/:expenseId', authMiddleware, (req, res) => {
+  try {
+    const { groupId, expenseId } = req.params;
+    const userId = req.user.id;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Get expense
+    const expense = getExpenseById(expenseId);
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        error: 'Expense not found'
+      });
+    }
+
+    // Verify expense belongs to this group
+    if (expense.groupId !== groupId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Expense does not belong to this group'
+      });
+    }
+
+    // Only the person who created the expense can delete it
+    if (expense.paidBy !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Only the expense creator can delete it'
+      });
+    }
+
+    // Delete splits first
+    deleteSplitsForExpense(expenseId);
+    
+    // Delete expense
+    deleteExpense(expenseId);
+
+    res.json({
+      success: true,
+      message: 'Expense deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete expense error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete expense'
     });
   }
 });

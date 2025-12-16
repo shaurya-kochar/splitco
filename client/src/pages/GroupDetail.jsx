@@ -1,8 +1,67 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { getGroupDetails, getExpenses } from '../api/groups';
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+}  return settlements.delete(settlementId);export function deleteSettlement(settlementId) {// Delete a settlement (for corrections)}  );    new Date(b.createdAt) - new Date(a.createdAt)  return userSettlements.sort((a, b) =>     }    }      }        userSettlements.push(settlement);      if (!groupId || settlement.groupId === groupId) {    if (settlement.fromUserId === userId || settlement.toUserId === userId) {  for (const settlement of settlements.values()) {    const userSettlements = [];export function getUserSettlements(userId, groupId = null) {// Get settlements involving a user}  );    new Date(b.createdAt) - new Date(a.createdAt)  return groupSettlements.sort((a, b) =>     }    }      groupSettlements.push(settlement);    if (settlement.groupId === groupId) {  for (const settlement of settlements.values()) {    const groupSettlements = [];export function getGroupSettlements(groupId) {// Get settlements for a group}  return settlement;  settlements.set(id, settlement);    };    createdAt: new Date().toISOString()    status: 'completed', // For MVP, all settlements are immediately completed    method, // 'upi', 'cash', 'bank_transfer', 'manual'    amount,    toUserId,    fromUserId,    groupId,    id,  const settlement = {  const id = crypto.randomUUID();export function createSettlement({ groupId, fromUserId, toUserId, amount, method = 'manual' }) {// Create a settlement recordconst settlements = new Map();import { getGroupDetails, getExpenses, getGroupBalances } from '../api/groups';
 import { useAuth } from '../context/AuthContext';
 import Toast from '../components/Toast';
+import SettleUpModal from '../components/SettleUpModal';
 
 export default function GroupDetail() {
   const { groupId } = useParams();
@@ -12,10 +71,13 @@ export default function GroupDetail() {
   
   const [group, setGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
+  const [balances, setBalances] = useState(null);
+  const [currentUserBalance, setCurrentUserBalance] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [showSettleUp, setShowSettleUp] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -34,12 +96,15 @@ export default function GroupDetail() {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [groupRes, expensesRes] = await Promise.all([
+      const [groupRes, expensesRes, balancesRes] = await Promise.all([
         getGroupDetails(groupId),
-        getExpenses(groupId)
+        getExpenses(groupId),
+        getGroupBalances(groupId)
       ]);
       setGroup(groupRes.group);
       setExpenses(expensesRes.expenses || []);
+      setBalances(balancesRes.balances || []);
+      setCurrentUserBalance(balancesRes.currentUserBalance || 0);
     } catch (err) {
       setError(err.message || 'Failed to load group');
     } finally {
@@ -181,6 +246,39 @@ export default function GroupDetail() {
           </div>
         </div>
 
+        {/* Balance Summary - Clear and prominent */}
+        {hasExpenses && currentUserBalance !== 0 && (
+          <div className="px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-1">
+                  Your Balance
+                </p>
+                <p className={`text-2xl font-semibold rupee ${
+                  currentUserBalance > 0 
+                    ? 'text-[var(--color-success)]' 
+                    : 'text-[var(--color-error)]'
+                }`}>
+                  {currentUserBalance > 0 ? '+' : ''}{formatAmount(Math.abs(currentUserBalance))}
+                </p>
+                <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
+                  {currentUserBalance > 0 
+                    ? 'You get back' 
+                    : 'You owe'}
+                </p>
+              </div>
+              {currentUserBalance < 0 && balances && (
+                <button
+                  onClick={() => setShowSettleUp(true)}
+                  className="py-2.5 px-5 bg-[var(--color-accent)] text-white rounded-xl text-sm font-medium hover:bg-[var(--color-accent-hover)] transition-all duration-200 shadow-[var(--shadow-sm)]"
+                >
+                  Settle Up
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Content Area */}
         {!hasExpenses ? (
           /* Empty State - Calm and intentional */
@@ -274,6 +372,21 @@ export default function GroupDetail() {
         isVisible={showToast}
         onClose={() => setShowToast(false)}
       />
+
+      {showSettleUp && (
+        <SettleUpModal
+          groupId={groupId}
+          balances={balances}
+          currentUserId={user?.id}
+          onClose={() => setShowSettleUp(false)}
+          onSettled={() => {
+            setShowSettleUp(false);
+            setToastMessage('Payment recorded');
+            setShowToast(true);
+            loadData(); // Reload to update balances
+          }}
+        />
+      )}
     </div>
   );
 }

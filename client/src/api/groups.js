@@ -67,3 +67,23 @@ export async function createExpense(groupId, { amount, description, splits }) {
 export async function getExpenses(groupId) {
   return request(`/groups/${groupId}/expenses`);
 }
+
+// Get balances for a group
+export async function getGroupBalances(groupId) {
+  return request(`/groups/${groupId}/balances`);
+}
+
+// Create a settlement
+export async function createSettlement(groupId, { toUserId, amount, method = 'manual' }) {
+  return request(`/groups/${groupId}/settlements`, {
+    method: 'POST',
+    body: JSON.stringify({ toUserId, amount, method }),
+  });
+}
+
+// Delete an expense
+export async function deleteExpense(groupId, expenseId) {
+  return request(`/groups/${groupId}/expenses/${expenseId}`, {
+    method: 'DELETE',
+  });
+}

@@ -36,3 +36,7 @@ export function getExpensesByGroup(groupId) {
 export function getExpenseById(id) {
   return expenses.get(id) || null;
 }
+
+export function deleteExpense(id) {
+  return expenses.delete(id);
+}

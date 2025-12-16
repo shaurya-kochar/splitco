@@ -22,6 +22,12 @@ export default function NewSplit() {
     e.preventDefault();
     if (!isValid || isLoading) return;
 
+    // Additional validation
+    if (phone.length !== 10) {
+      setError('Phone number must be 10 digits');
+      return;
+    }
+
     setIsLoading(true);
     setError('');
 

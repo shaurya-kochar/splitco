@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getGroups } from '../api/groups';
 import { useAuth } from '../context/AuthContext';
+import DevModeWarning from '../components/DevModeWarning';
 
 export default function Home() {
   const [groups, setGroups] = useState([]);
@@ -46,6 +47,9 @@ export default function Home() {
 
   return (
     <div className="min-h-dvh flex flex-col bg-[var(--color-bg)]">
+      {/* Dev Mode Warning */}
+      <DevModeWarning />
+      
       {/* Header */}
       <header className="sticky top-0 z-10 bg-[var(--color-bg)]/90 backdrop-blur-lg border-b border-[var(--color-border)]">
         <div className="max-w-lg mx-auto px-6 h-14 flex items-center justify-between">

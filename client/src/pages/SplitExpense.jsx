@@ -84,9 +84,14 @@ export default function SplitExpense() {
   };
 
   const handleCustomAmountChange = (userId, value) => {
+    // Allow empty string or valid decimal numbers
+    if (value !== '' && !/^\d*\.?\d{0,2}$/.test(value)) {
+      return; // Invalid format
+    }
+    
     const numValue = value === '' ? 0 : parseFloat(value);
     
-    if (!isNaN(numValue) && numValue >= 0) {
+    if (!isNaN(numValue) && numValue >= 0 && numValue <= expenseData.amount) {
       setMemberSplits(prev => prev.map(split => {
         if (split.userId === userId) {
           return { 
@@ -126,7 +131,16 @@ export default function SplitExpense() {
     const total = calculateTotal();
     const diff = Math.abs(total - expenseData.amount);
     const hasIncluded = memberSplits.some(s => s.isIncluded);
-    return hasIncluded && diff < 0.01;
+    
+    // Must have at least one person included
+    if (!hasIncluded) return false;
+    
+    // Total must match expense amount (within 1 paisa)
+    if (diff >= 0.01) return false;
+    
+    // All included members must have positive amounts
+    const allPositive = memberSplits.every(s => !s.isIncluded || s.shareAmount > 0);
+    return allPositive;
   };
 
   const handleSave = async () => {

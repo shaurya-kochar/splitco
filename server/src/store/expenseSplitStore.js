@@ -63,3 +63,17 @@ export function validateSplits(splits, totalAmount) {
   const diff = Math.abs(sum - totalAmount);
   return diff < 0.01;
 }
+
+// Delete splits for an expense
+export function deleteSplitsForExpense(expenseId) {
+  const toDelete = [];
+  
+  for (const [id, split] of expenseSplits.entries()) {
+    if (split.expenseId === expenseId) {
+      toDelete.push(id);
+    }
+  }
+  
+  toDelete.forEach(id => expenseSplits.delete(id));
+  return toDelete.length;
+}
