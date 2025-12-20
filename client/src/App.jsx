@@ -6,8 +6,10 @@ import Home from './pages/Home';
 import CreateGroup from './pages/CreateGroup';
 import NewSplit from './pages/NewSplit';
 import GroupDetail from './pages/GroupDetail';
+import GroupInfo from './pages/GroupInfo';
 import JoinGroup from './pages/JoinGroup';
 import AddExpense from './pages/AddExpense';
+import WhoPaid from './pages/WhoPaid';
 import SplitExpense from './pages/SplitExpense';
 
 function ProtectedRoute({ children }) {
@@ -98,10 +100,26 @@ function AppRoutes() {
         } 
       />
       <Route 
+        path="/group/:groupId/info" 
+        element={
+          <ProtectedRoute>
+            <GroupInfo />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
         path="/group/:groupId/add-expense" 
         element={
           <ProtectedRoute>
             <AddExpense />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/group/:groupId/add-expense/who-paid" 
+        element={
+          <ProtectedRoute>
+            <WhoPaid />
           </ProtectedRoute>
         } 
       />

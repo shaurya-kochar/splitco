@@ -327,7 +327,7 @@ router.post('/direct', authMiddleware, (req, res) => {
 router.post('/:groupId/expenses', authMiddleware, (req, res) => {
   try {
     const { groupId } = req.params;
-    const { amount, description, splits } = req.body;
+    const { amount, description, splits, paidBy } = req.body;
     const userId = req.user.id;
 
     // Validate group exists
@@ -390,11 +390,34 @@ router.post('/:groupId/expenses', authMiddleware, (req, res) => {
       }
     }
 
+    // Handle paidBy - default to current user if not provided
+    let paidByUserId = userId;
+    let paidByData = { mode: 'single', userId };
+    
+    if (paidBy) {
+      if (paidBy.mode === 'single') {
+        paidByUserId = paidBy.userId;
+        paidByData = paidBy;
+      } else if (paidBy.mode === 'multiple') {
+        // Validate multiple payers
+        const paymentSum = paidBy.payments.reduce((sum, p) => sum + p.amount, 0);
+        if (Math.abs(paymentSum - amount) >= 0.01) {
+          return res.status(400).json({
+            success: false,
+            error: 'Payment amounts must sum to total amount'
+          });
+        }
+        paidByUserId = paidBy.payments[0].userId; // Use first payer as primary
+        paidByData = paidBy;
+      }
+    }
+
     // Create expense
     const expense = createExpense({
       groupId,
       amount,
-      paidBy: userId,
+      paidBy: paidByUserId,
+      paidByData: JSON.stringify(paidByData), // Store full payment data
       description: description?.trim() || null
     });
 
@@ -402,7 +425,7 @@ router.post('/:groupId/expenses', authMiddleware, (req, res) => {
     const splitRecords = createExpenseSplits(expense.id, splits);
 
     // Get payer details
-    const payer = findUserById(userId);
+    const payer = findUserById(paidByUserId);
 
     res.json({
       success: true,
@@ -411,10 +434,11 @@ router.post('/:groupId/expenses', authMiddleware, (req, res) => {
         groupId: expense.groupId,
         amount: expense.amount,
         paidBy: {
-          id: userId,
+          id: paidByUserId,
           phone: payer?.phone || 'Unknown',
           name: payer?.name || ''
         },
+        paidByData: paidByData,
         description: expense.description,
         createdAt: expense.createdAt,
         splits: splitRecords.map(split => ({
@@ -477,6 +501,7 @@ router.get('/:groupId/expenses', authMiddleware, (req, res) => {
           phone: payer?.phone || 'Unknown',
           name: payer?.name || ''
         },
+        paidByData: expense.paidByData, // Include multi-payer data if present
         description: expense.description,
         createdAt: expense.createdAt,
         splits: splits.map(split => {
@@ -598,8 +623,8 @@ router.get('/:groupId/balances', authMiddleware, (req, res) => {
 router.post('/:groupId/settlements', authMiddleware, (req, res) => {
   try {
     const { groupId } = req.params;
-    const { toUserId, amount, method = 'manual' } = req.body;
-    const fromUserId = req.user.id;
+    const { fromUserId, toUserId, amount, method = 'manual' } = req.body;
+    const currentUserId = req.user.id;
 
     // Validate group exists
     const group = getGroupById(groupId);
@@ -610,15 +635,30 @@ router.post('/:groupId/settlements', authMiddleware, (req, res) => {
       });
     }
 
-    // Validate user is a member
-    if (!isMember(groupId, fromUserId)) {
+    // Validate current user is a member
+    if (!isMember(groupId, currentUserId)) {
       return res.status(403).json({
         success: false,
         error: 'Not a member of this group'
       });
     }
+    
+    // Validate fromUserId and toUserId are provided
+    if (!fromUserId || !toUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both fromUserId and toUserId are required'
+      });
+    }
 
-    // Validate recipient is a member
+    // Validate both users are members
+    if (!isMember(groupId, fromUserId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payer is not a member of this group'
+      });
+    }
+
     if (!isMember(groupId, toUserId)) {
       return res.status(400).json({
         success: false,
@@ -717,13 +757,15 @@ router.get('/:groupId/settlements', authMiddleware, (req, res) => {
       return {
         id: settlement.id,
         groupId: settlement.groupId,
-        from: {
+        fromUser: {
           id: settlement.fromUserId,
-          name: fromUser?.name || fromUser?.phone || 'Unknown'
+          name: fromUser?.name || '',
+          phone: fromUser?.phone || ''
         },
-        to: {
+        toUser: {
           id: settlement.toUserId,
-          name: toUser?.name || toUser?.phone || 'Unknown'
+          name: toUser?.name || '',
+          phone: toUser?.phone || ''
         },
         amount: settlement.amount,
         method: settlement.method,

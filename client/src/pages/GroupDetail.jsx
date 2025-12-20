@@ -1,67 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-}  return settlements.delete(settlementId);export function deleteSettlement(settlementId) {// Delete a settlement (for corrections)}  );    new Date(b.createdAt) - new Date(a.createdAt)  return userSettlements.sort((a, b) =>     }    }      }        userSettlements.push(settlement);      if (!groupId || settlement.groupId === groupId) {    if (settlement.fromUserId === userId || settlement.toUserId === userId) {  for (const settlement of settlements.values()) {    const userSettlements = [];export function getUserSettlements(userId, groupId = null) {// Get settlements involving a user}  );    new Date(b.createdAt) - new Date(a.createdAt)  return groupSettlements.sort((a, b) =>     }    }      groupSettlements.push(settlement);    if (settlement.groupId === groupId) {  for (const settlement of settlements.values()) {    const groupSettlements = [];export function getGroupSettlements(groupId) {// Get settlements for a group}  return settlement;  settlements.set(id, settlement);    };    createdAt: new Date().toISOString()    status: 'completed', // For MVP, all settlements are immediately completed    method, // 'upi', 'cash', 'bank_transfer', 'manual'    amount,    toUserId,    fromUserId,    groupId,    id,  const settlement = {  const id = crypto.randomUUID();export function createSettlement({ groupId, fromUserId, toUserId, amount, method = 'manual' }) {// Create a settlement recordconst settlements = new Map();import { getGroupDetails, getExpenses, getGroupBalances } from '../api/groups';
+import { getGroupDetails, getExpenses, getGroupBalances, getSettlements } from '../api/groups';
 import { useAuth } from '../context/AuthContext';
 import Toast from '../components/Toast';
 import SettleUpModal from '../components/SettleUpModal';
+import Statistics from '../components/Statistics';
 
 export default function GroupDetail() {
   const { groupId } = useParams();
@@ -71,6 +14,7 @@ export default function GroupDetail() {
   
   const [group, setGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
+  const [activityFeed, setActivityFeed] = useState([]); // Combined expenses + settlements
   const [balances, setBalances] = useState(null);
   const [currentUserBalance, setCurrentUserBalance] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -78,10 +22,45 @@ export default function GroupDetail() {
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showSettleUp, setShowSettleUp] = useState(false);
+  const [showSettlementPicker, setShowSettlementPicker] = useState(false);
+  const [selectedSettlement, setSelectedSettlement] = useState(null);
+  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' or 'statistics'
+
+  const loadData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const [groupRes, expensesRes, settlementsRes, balancesRes] = await Promise.all([
+        getGroupDetails(groupId),
+        getExpenses(groupId),
+        getSettlements(groupId),
+        getGroupBalances(groupId)
+      ]);
+      setGroup(groupRes.group);
+      
+      const expensesData = expensesRes.expenses || [];
+      const settlementsData = settlementsRes.settlements || [];
+      
+      setExpenses(expensesData);
+      
+      // Combine expenses and settlements into activity feed, sorted by date
+      const combinedFeed = [
+        ...expensesData.map(e => ({ ...e, type: 'expense' })),
+        ...settlementsData.map(s => ({ ...s, type: 'settlement' }))
+      ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      
+      setActivityFeed(combinedFeed);
+      setBalances(balancesRes.balances || []);
+      setCurrentUserBalance(balancesRes.currentUserBalance || 0);
+    } catch (err) {
+      setError(err.message || 'Failed to load group');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [groupId]);
 
   useEffect(() => {
     loadData();
-  }, [groupId]);
+  }, [loadData]);
 
   // Show success toast if coming back from adding expense
   useEffect(() => {
@@ -93,24 +72,15 @@ export default function GroupDetail() {
     }
   }, [location.state]);
 
-  const loadData = async () => {
-    try {
-      setIsLoading(true);
-      const [groupRes, expensesRes, balancesRes] = await Promise.all([
-        getGroupDetails(groupId),
-        getExpenses(groupId),
-        getGroupBalances(groupId)
-      ]);
-      setGroup(groupRes.group);
-      setExpenses(expensesRes.expenses || []);
-      setBalances(balancesRes.balances || []);
-      setCurrentUserBalance(balancesRes.currentUserBalance || 0);
-    } catch (err) {
-      setError(err.message || 'Failed to load group');
-    } finally {
-      setIsLoading(false);
+  // Show success toast if coming back from adding expense
+  useEffect(() => {
+    if (location.state?.expenseAdded) {
+      setToastMessage('Expense added');
+      setShowToast(true);
+      // Clear the state to prevent showing toast on refresh
+      window.history.replaceState({}, document.title);
     }
-  };
+  }, [location.state]);
 
   const handleInvite = async () => {
     const inviteUrl = `${window.location.origin}/join/${groupId}`;
@@ -160,6 +130,21 @@ export default function GroupDetail() {
     return expense.paidBy.name || expense.paidBy.phone?.slice(-4) || 'Someone';
   };
 
+  const getSettlementText = (settlement) => {
+    if (!settlement.fromUser || !settlement.toUser) {
+      return 'Payment recorded';
+    }
+    
+    const fromName = settlement.fromUser.id === user?.id 
+      ? 'You' 
+      : (settlement.fromUser.name || settlement.fromUser.phone?.slice(-4) || 'Someone');
+    const toName = settlement.toUser.id === user?.id 
+      ? 'you' 
+      : (settlement.toUser.name || settlement.toUser.phone?.slice(-4) || 'someone');
+    
+    return `${fromName} paid ${toName}`;
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-dvh flex items-center justify-center bg-[var(--color-bg)]">
@@ -203,14 +188,24 @@ export default function GroupDetail() {
             {title}
           </h1>
           {!isDirectSplit ? (
-            <button
-              onClick={handleInvite}
-              className="p-1 -mr-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
-            >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate(`/group/${groupId}/info`)}
+                className="p-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                </svg>
+              </button>
+              <button
+                onClick={handleInvite}
+                className="p-1 -mr-1 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                </svg>
+              </button>
+            </div>
           ) : (
             <div className="w-6" />
           )}
@@ -218,9 +213,36 @@ export default function GroupDetail() {
       </header>
 
       <div className="flex-1 flex flex-col max-w-lg mx-auto w-full">
-        {/* Members Section - Subtle, not loud */}
-        <div className="px-6 py-4 border-b border-[var(--color-border-subtle)]">
-          <div className="flex items-center gap-3">
+        {/* Tab Navigation */}
+        <div className="flex border-b border-[var(--color-border)]">
+          <button
+            onClick={() => setActiveView('dashboard')}
+            className={`flex-1 py-3 px-4 text-sm font-medium transition-colors ${
+              activeView === 'dashboard'
+                ? 'text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+            }`}
+          >
+            Dashboard
+          </button>
+          <button
+            onClick={() => setActiveView('statistics')}
+            className={`flex-1 py-3 px-4 text-sm font-medium transition-colors ${
+              activeView === 'statistics'
+                ? 'text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]'
+                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
+            }`}
+          >
+            Statistics
+          </button>
+        </div>
+
+        {/* Dashboard View */}
+        {activeView === 'dashboard' && (
+          <>
+            {/* Members Section - Subtle, not loud */}
+            <div className="px-6 py-4 border-b border-[var(--color-border-subtle)]">
+              <div className="flex items-center gap-3">
             <div className="flex -space-x-2">
               {group.members.slice(0, 4).map((member, index) => (
                 <div
@@ -247,7 +269,7 @@ export default function GroupDetail() {
         </div>
 
         {/* Balance Summary - Clear and prominent */}
-        {hasExpenses && currentUserBalance !== 0 && (
+        {hasExpenses && (
           <div className="px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
             <div className="flex items-center justify-between">
               <div>
@@ -257,24 +279,26 @@ export default function GroupDetail() {
                 <p className={`text-2xl font-semibold rupee ${
                   currentUserBalance > 0 
                     ? 'text-[var(--color-success)]' 
-                    : 'text-[var(--color-error)]'
+                    : currentUserBalance < 0
+                    ? 'text-[var(--color-error)]'
+                    : 'text-[var(--color-text-secondary)]'
                 }`}>
                   {currentUserBalance > 0 ? '+' : ''}{formatAmount(Math.abs(currentUserBalance))}
                 </p>
                 <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
                   {currentUserBalance > 0 
                     ? 'You get back' 
-                    : 'You owe'}
+                    : currentUserBalance < 0
+                    ? 'You owe'
+                    : 'All settled up'}
                 </p>
               </div>
-              {currentUserBalance < 0 && balances && (
-                <button
-                  onClick={() => setShowSettleUp(true)}
-                  className="py-2.5 px-5 bg-[var(--color-accent)] text-white rounded-xl text-sm font-medium hover:bg-[var(--color-accent-hover)] transition-all duration-200 shadow-[var(--shadow-sm)]"
-                >
-                  Settle Up
-                </button>
-              )}
+              <button
+                onClick={() => setShowSettlementPicker(true)}
+                className="py-2.5 px-5 bg-[var(--color-accent)] text-white rounded-xl text-sm font-medium hover:bg-[var(--color-accent-hover)] transition-all duration-200 shadow-[var(--shadow-sm)]"
+              >
+                Record Settlement
+              </button>
             </div>
           </div>
         )}
@@ -308,46 +332,82 @@ export default function GroupDetail() {
             </div>
           </div>
         ) : (
-          /* Expense Feed */
+          /* Activity Feed (Expenses + Settlements) */
           <div className="flex-1 overflow-auto px-6 py-4">
             <div className="space-y-3">
-              {expenses.map((expense, index) => (
+              {activityFeed.map((item, index) => (
                 <div
-                  key={expense.id}
+                  key={`${item.type}-${item.id}`}
                   className={`
                     card p-4 animate-fade-in
                     ${index === 0 && location.state?.expenseAdded ? 'ring-2 ring-[var(--color-success)]/20' : ''}
                   `}
                   style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      {/* Amount - Primary */}
-                      <p className="text-xl font-semibold text-[var(--color-text-primary)] rupee">
-                        {formatAmount(expense.amount)}
-                      </p>
-                      {/* Paid by - Secondary */}
-                      <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
-                        Paid by {getPayerName(expense)}
-                      </p>
-                      {/* Split info - Subtle */}
-                      {expense.splits && expense.splits.length > 0 && (
-                        <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
-                          Split {expense.splits.length} {expense.splits.length === 1 ? 'way' : 'ways'}
+                  {item.type === 'expense' ? (
+                    /* Expense Item */
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        {/* Amount - Primary */}
+                        <p className="text-xl font-semibold text-[var(--color-text-primary)] rupee">
+                          {formatAmount(item.amount)}
                         </p>
-                      )}
-                      {/* Description - If present */}
-                      {expense.description && (
-                        <p className="text-sm text-[var(--color-text-muted)] mt-2 truncate">
-                          {expense.description}
+                        {/* Paid by - Secondary */}
+                        <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
+                          Paid by {getPayerName(item)}
                         </p>
-                      )}
+                        {/* Split info - Subtle */}
+                        {item.splits && item.splits.length > 0 && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
+                            Split {item.splits.length} {item.splits.length === 1 ? 'way' : 'ways'}
+                          </p>
+                        )}
+                        {/* Description - If present */}
+                        {item.description && (
+                          <p className="text-sm text-[var(--color-text-muted)] mt-2 truncate">
+                            {item.description}
+                          </p>
+                        )}
+                      </div>
+                      {/* Timestamp - Very subtle */}
+                      <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap pt-1">
+                        {formatTime(item.createdAt)}
+                      </span>
                     </div>
-                    {/* Timestamp - Very subtle */}
-                    <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap pt-1">
-                      {formatTime(expense.createdAt)}
-                    </span>
-                  </div>
+                  ) : (
+                    /* Settlement Item */
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        {/* Settlement badge */}
+                        <div className="flex items-center gap-2 mb-2">
+                          <svg className="w-4 h-4 text-[var(--color-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                          <span className="text-xs font-medium text-[var(--color-success)] uppercase tracking-wider">
+                            Settlement
+                          </span>
+                        </div>
+                        {/* Amount */}
+                        <p className="text-xl font-semibold text-[var(--color-text-primary)] rupee">
+                          {formatAmount(item.amount)}
+                        </p>
+                        {/* Settlement details */}
+                        <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
+                          {getSettlementText(item)}
+                        </p>
+                        {/* Method */}
+                        {item.method && (
+                          <p className="text-xs text-[var(--color-text-muted)] mt-1.5 capitalize">
+                            {item.method}
+                          </p>
+                        )}
+                      </div>
+                      {/* Timestamp */}
+                      <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap pt-1">
+                        {formatTime(item.createdAt)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -365,6 +425,48 @@ export default function GroupDetail() {
             </button>
           </div>
         </div>
+          </>
+        )}
+
+        {/* Statistics View */}
+        {activeView === 'statistics' && (
+          <div className="flex-1 overflow-auto">
+            {hasExpenses ? (
+              <Statistics 
+                expenses={expenses}
+                balances={balances}
+                group={group}
+                currentUser={user}
+              />
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center px-8 py-12">
+                <div className="animate-fade-in text-center">
+                  <div className="w-16 h-16 mx-auto mb-5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl flex items-center justify-center shadow-[var(--shadow-sm)]">
+                    <svg 
+                      className="w-7 h-7 text-[var(--color-text-muted)]"
+                      fill="none" 
+                      viewBox="0 0 24 24" 
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                    >
+                      <path 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                        d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" 
+                      />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">
+                    No statistics yet
+                  </h3>
+                  <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed max-w-[240px] mx-auto">
+                    Add expenses to see group statistics
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <Toast 
@@ -373,14 +475,108 @@ export default function GroupDetail() {
         onClose={() => setShowToast(false)}
       />
 
-      {showSettleUp && (
+      {/* Settlement Picker Modal */}
+      {showSettlementPicker && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 animate-fade-in" onClick={() => setShowSettlementPicker(false)}>
+          <div 
+            className="w-full max-w-lg bg-[var(--color-bg)] rounded-t-3xl p-6 animate-slide-up safe-area-bottom max-h-[80vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
+                  Record Settlement
+                </h2>
+                <button
+                  onClick={() => setShowSettlementPicker(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--color-border)] transition-colors"
+                >
+                  <svg className="w-5 h-5 text-[var(--color-text-secondary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <p className="text-sm text-[var(--color-text-secondary)]">
+                Select who paid whom
+              </p>
+            </div>
+
+            {/* Balances List */}
+            {balances && balances.length > 0 ? (
+              <div className="space-y-3">
+                {balances.map((balance, index) => {
+                  const userName = balance.userName || balance.userPhone?.slice(-4) || 'Unknown';
+                  const owes = balance.owes || [];
+                  
+                  return owes.map((debt, debtIndex) => {
+                    const creditorName = debt.userName || debt.userPhone?.slice(-4) || 'Unknown';
+                    
+                    return (
+                      <button
+                        key={`${balance.userId}-${debt.userId}-${debtIndex}`}
+                        onClick={() => {
+                          setSelectedSettlement({
+                            fromUser: { id: balance.userId, name: userName, phone: balance.userPhone },
+                            toUser: { id: debt.userId, name: creditorName, phone: debt.userPhone },
+                            amount: debt.amount
+                          });
+                          setShowSettlementPicker(false);
+                          setShowSettleUp(true);
+                        }}
+                        className="w-full card p-4 text-left hover:bg-[var(--color-accent-subtle)] transition-colors animate-fade-in"
+                        style={{ animationDelay: `${(index * owes.length + debtIndex) * 50}ms` }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-base font-medium text-[var(--color-text-primary)]">
+                              {userName} → {creditorName}
+                            </p>
+                            <p className="text-sm text-[var(--color-text-muted)] mt-1">
+                              {userName === 'You' || balance.userId === user?.id ? 'You owe' : `${userName} owes`} {creditorName === 'You' || debt.userId === user?.id ? 'you' : creditorName}
+                            </p>
+                          </div>
+                          <p className="text-lg font-semibold text-[var(--color-error)] rupee">
+                            {formatAmount(debt.amount)}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  });
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-8">
+                <div className="w-16 h-16 mx-auto mb-4 bg-[var(--color-success)]/10 rounded-full flex items-center justify-center">
+                  <svg className="w-8 h-8 text-[var(--color-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">
+                  All settled up!
+                </h3>
+                <p className="text-[var(--color-text-secondary)]">
+                  No outstanding balances in this group
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showSettleUp && selectedSettlement && (
         <SettleUpModal
           groupId={groupId}
-          balances={balances}
-          currentUserId={user?.id}
-          onClose={() => setShowSettleUp(false)}
+          fromUser={selectedSettlement.fromUser}
+          toUser={selectedSettlement.toUser}
+          defaultAmount={selectedSettlement.amount}
+          onClose={() => {
+            setShowSettleUp(false);
+            setSelectedSettlement(null);
+          }}
           onSettled={() => {
             setShowSettleUp(false);
+            setSelectedSettlement(null);
             setToastMessage('Payment recorded');
             setShowToast(true);
             loadData(); // Reload to update balances

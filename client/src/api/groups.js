@@ -56,10 +56,10 @@ export async function createDirectSplit(phone) {
 }
 
 // Create an expense in a group
-export async function createExpense(groupId, { amount, description, splits }) {
+export async function createExpense(groupId, { amount, description, splits, paidBy }) {
   return request(`/groups/${groupId}/expenses`, {
     method: 'POST',
-    body: JSON.stringify({ amount, description, splits }),
+    body: JSON.stringify({ amount, description, splits, paidBy }),
   });
 }
 
@@ -74,11 +74,16 @@ export async function getGroupBalances(groupId) {
 }
 
 // Create a settlement
-export async function createSettlement(groupId, { toUserId, amount, method = 'manual' }) {
+export async function createSettlement(groupId, { fromUserId, toUserId, amount, method = 'manual' }) {
   return request(`/groups/${groupId}/settlements`, {
     method: 'POST',
-    body: JSON.stringify({ toUserId, amount, method }),
+    body: JSON.stringify({ fromUserId, toUserId, amount, method }),
   });
+}
+
+// Get settlements for a group
+export async function getSettlements(groupId) {
+  return request(`/groups/${groupId}/settlements`);
 }
 
 // Delete an expense

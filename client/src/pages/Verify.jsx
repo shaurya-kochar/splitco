@@ -21,6 +21,8 @@ export default function Verify() {
   const { login } = useAuth();
 
   const phone = location.state?.phone;
+  const username = location.state?.username;
+  const email = location.state?.email;
 
   // Resend timer countdown
   useEffect(() => {
@@ -94,7 +96,7 @@ export default function Verify() {
     setError('');
 
     try {
-      const response = await verifyOtp(phone, otpValue);
+      const response = await verifyOtp(phone, otpValue, username, email);
       login(response.user);
       navigate('/home', { replace: true });
     } catch (err) {
@@ -127,7 +129,7 @@ export default function Verify() {
     <Layout>
       <div className="flex-1 flex flex-col justify-center px-6 max-w-lg mx-auto w-full">
         <div className="animate-fade-in">
-          {/* Header */}
+          {/* OTP Input */}
           <div className="text-center mb-10">
             <h2 className="text-2xl font-semibold text-[var(--color-text-primary)] mb-2">
               Verify your number

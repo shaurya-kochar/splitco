@@ -3,13 +3,14 @@
 
 const expenses = new Map();
 
-export function createExpense({ groupId, amount, paidBy, description }) {
+export function createExpense({ groupId, amount, paidBy, paidByData, description }) {
   const id = crypto.randomUUID();
   const expense = {
     id,
     groupId,
     amount,
     paidBy,
+    paidByData: paidByData || null, // Store payment mode data
     description: description || null,
     createdAt: new Date().toISOString()
   };

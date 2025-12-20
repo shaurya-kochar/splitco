@@ -16,23 +16,65 @@ export function calculateGroupBalances(expenses, settlements = []) {
   const owesMatrix = new Map(); // userId -> Map(otherUserId -> amount)
   
   for (const expense of expenses) {
-    const paidBy = expense.paidBy;
     const splits = expense.splits || [];
     
-    // Each person who has a split owes the payer their share
-    for (const split of splits) {
-      if (split.userId === paidBy) {
-        // Payer doesn't owe themselves
-        continue;
+    // Determine who paid and how much
+    let payers = [];
+    
+    // Check if this is a multi-payer expense
+    if (expense.paidByData) {
+      try {
+        const paidByData = typeof expense.paidByData === 'string' 
+          ? JSON.parse(expense.paidByData) 
+          : expense.paidByData;
+        
+        if (paidByData.mode === 'multiple' && paidByData.payments) {
+          // Multiple payers
+          payers = paidByData.payments.map(p => ({
+            userId: p.userId,
+            amount: p.amount
+          }));
+        } else {
+          // Single payer stored in paidByData
+          payers = [{ userId: expense.paidBy, amount: expense.amount }];
+        }
+      } catch (e) {
+        // Fallback to single payer if JSON parse fails
+        payers = [{ userId: expense.paidBy, amount: expense.amount }];
       }
+    } else {
+      // Traditional single payer
+      payers = [{ userId: expense.paidBy, amount: expense.amount }];
+    }
+    
+    // For each payer, calculate what each splitter owes them
+    for (const payer of payers) {
+      const payerId = payer.userId;
+      const paidAmount = payer.amount;
       
-      // split.userId owes paidBy the split.shareAmount
-      if (!owesMatrix.has(split.userId)) {
-        owesMatrix.set(split.userId, new Map());
+      // Calculate what proportion this payer paid
+      const payerProportion = paidAmount / expense.amount;
+      
+      // Each person who has a split owes the payer their proportional share
+      for (const split of splits) {
+        if (split.userId === payerId) {
+          // Payer might still owe other payers if multi-payer
+          // But doesn't owe themselves for their own payment
+          continue;
+        }
+        
+        // split.userId owes this payer a proportion of their share
+        const owedToThisPayer = split.shareAmount * payerProportion;
+        
+        if (owedToThisPayer < 0.01) continue; // Skip negligible amounts
+        
+        if (!owesMatrix.has(split.userId)) {
+          owesMatrix.set(split.userId, new Map());
+        }
+        
+        const currentOwed = owesMatrix.get(split.userId).get(payerId) || 0;
+        owesMatrix.get(split.userId).set(payerId, currentOwed + owedToThisPayer);
       }
-      
-      const currentOwed = owesMatrix.get(split.userId).get(paidBy) || 0;
-      owesMatrix.get(split.userId).set(paidBy, currentOwed + split.shareAmount);
     }
   }
   
@@ -70,9 +112,32 @@ export function calculateGroupBalances(expenses, settlements = []) {
     users.add(userId);
   }
   
-  // Also add all payers
+  // Also add all payers and splitters to ensure everyone is in the balances map
   for (const expense of expenses) {
+    // Add the main paidBy user
     users.add(expense.paidBy);
+    
+    // Add all payers from multi-payer expenses
+    if (expense.paidByData) {
+      try {
+        const paidByData = typeof expense.paidByData === 'string' 
+          ? JSON.parse(expense.paidByData) 
+          : expense.paidByData;
+        
+        if (paidByData.mode === 'multiple' && paidByData.payments) {
+          for (const payment of paidByData.payments) {
+            users.add(payment.userId);
+          }
+        }
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+    
+    // Add all splitters
+    for (const split of expense.splits || []) {
+      users.add(split.userId);
+    }
   }
   
   // Initialize balance structure for all users
