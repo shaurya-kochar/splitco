@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getGroupDetails } from '../api/groups';
+import { getGroupDetails, exportCSV, exportJSON } from '../api/groups';
+import Toast from '../components/Toast';
 
 export default function GroupInfo() {
   const { groupId } = useParams();
@@ -9,6 +10,9 @@ export default function GroupInfo() {
   const [group, setGroup] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const loadGroup = async () => {
@@ -33,6 +37,78 @@ export default function GroupInfo() {
       return `+91 ${number.slice(0, 5)} ${number.slice(5)}`;
     }
     return phone;
+  };
+
+  const handleExportCSV = async () => {
+    try {
+      setIsExporting(true);
+      const blob = await exportCSV(groupId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `splitco_${group.name}_${Date.now()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setToastMessage('CSV exported successfully');
+      setShowToast(true);
+    } catch (err) {
+      setToastMessage(err.message || 'Export failed');
+      setShowToast(true);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportPDF = async () => {
+    try {
+      setIsExporting(true);
+      const response = await exportJSON(groupId);
+      const data = response.exportData;
+      
+      // Generate simple text-based PDF content
+      let pdfContent = `${data.group.name}\n`;
+      pdfContent += `Export Date: ${new Date(data.exportDate).toLocaleString()}\n\n`;
+      pdfContent += `=== MEMBERS ===\n`;
+      data.members.forEach(m => {
+        pdfContent += `${m.name} (${m.phone})\n`;
+      });
+      pdfContent += `\n=== EXPENSES ===\n`;
+      data.expenses.forEach(e => {
+        pdfContent += `${new Date(e.createdAt).toLocaleDateString()} - ₹${e.amount}\n`;
+        pdfContent += `  Description: ${e.description || 'N/A'}\n`;
+        pdfContent += `  Splits: ${e.splits.map(s => `${s.userName}: ₹${s.shareAmount}`).join(', ')}\n\n`;
+      });
+      pdfContent += `\n=== SETTLEMENTS ===\n`;
+      data.settlements.forEach(s => {
+        pdfContent += `${new Date(s.createdAt).toLocaleDateString()} - ₹${s.amount}\n`;
+        pdfContent += `  ${s.fromUserName} → ${s.toUserName}\n\n`;
+      });
+      pdfContent += `\n=== CURRENT BALANCES ===\n`;
+      data.balances.forEach(b => {
+        const status = b.balance > 0 ? `gets back ₹${b.balance}` : b.balance < 0 ? `owes ₹${Math.abs(b.balance)}` : 'settled';
+        pdfContent += `${b.userName}: ${status}\n`;
+      });
+
+      // Download as text file (PDF generation requires library)
+      const blob = new Blob([pdfContent], { type: 'text/plain' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `splitco_${group.name}_${Date.now()}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      setToastMessage('Report exported successfully');
+      setShowToast(true);
+    } catch (err) {
+      setToastMessage(err.message || 'Export failed');
+      setShowToast(true);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (isLoading) {
@@ -155,7 +231,46 @@ export default function GroupInfo() {
             ))}
           </div>
         </div>
+
+        {/* Export Section */}
+        <div className="px-6 py-4 border-t border-[var(--color-border-subtle)]">
+          <h3 className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-4">
+            Export Data
+          </h3>
+          <div className="space-y-3">
+            <button
+              onClick={handleExportCSV}
+              disabled={isExporting}
+              className="w-full py-3 px-4 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl text-[var(--color-text-primary)] font-medium hover:bg-[var(--color-accent-subtle)] hover:border-[var(--color-accent)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {isExporting ? 'Exporting...' : 'Export as CSV'}
+            </button>
+            <button
+              onClick={handleExportPDF}
+              disabled={isExporting}
+              className="w-full py-3 px-4 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl text-[var(--color-text-primary)] font-medium hover:bg-[var(--color-accent-subtle)] hover:border-[var(--color-accent)] transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+              </svg>
+              {isExporting ? 'Exporting...' : 'Export Report'}
+            </button>
+          </div>
+          <p className="text-xs text-[var(--color-text-muted)] mt-3">
+            Export all expenses, settlements, and balances for this group
+          </p>
+        </div>
       </div>
+
+      {showToast && (
+        <Toast
+          message={toastMessage}
+          onClose={() => setShowToast(false)}
+        />
+      )}
     </div>
   );
 }

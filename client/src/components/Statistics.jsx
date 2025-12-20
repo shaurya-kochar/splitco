@@ -1,4 +1,4 @@
-export default function Statistics({ expenses, balances, group, currentUser }) {
+export default function Statistics({ expenses, settlements = [], balances, group, currentUser }) {
   const formatAmount = (amount) => {
     return new Intl.NumberFormat('en-IN', {
       style: 'currency',
@@ -8,13 +8,69 @@ export default function Statistics({ expenses, balances, group, currentUser }) {
     }).format(amount);
   };
 
-  // Calculate total group spending
+  // Calculate total group spending (expenses only)
   const totalSpending = expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-  // Calculate total paid by each user
+  // Calculate net balances using pure net balance approach (same as backend)
+  const calculateNetBalances = () => {
+    const netBalances = new Map();
+    
+    // Helper to safely update balance
+    const addBalance = (userId, amount) => {
+      const current = netBalances.get(userId) || 0;
+      netBalances.set(userId, current + amount);
+    };
+
+    // 1. Process Expenses - Payers gain equity, Splitters lose equity
+    expenses.forEach(expense => {
+      // Handle payers (they gain equity)
+      let payers = [];
+      if (expense.paidByData) {
+        try {
+          const paidByData = typeof expense.paidByData === 'string' 
+            ? JSON.parse(expense.paidByData) 
+            : expense.paidByData;
+          
+          if (paidByData.mode === 'multiple' && paidByData.payments) {
+            payers = paidByData.payments;
+          } else {
+            payers = [{ userId: expense.paidBy.id, amount: expense.amount }];
+          }
+        } catch (e) {
+          payers = [{ userId: expense.paidBy.id, amount: expense.amount }];
+        }
+      } else {
+        payers = [{ userId: expense.paidBy.id, amount: expense.amount }];
+      }
+
+      // Add amounts to payers' balances
+      payers.forEach(payer => {
+        addBalance(payer.userId, payer.amount);
+      });
+
+      // Handle splitters (they lose equity/incur debt)
+      expense.splits?.forEach(split => {
+        addBalance(split.userId, -split.shareAmount);
+      });
+    });
+
+    // 2. Process Settlements - Payer gains equity, Receiver loses equity
+    settlements.forEach(settlement => {
+      // The person paying (fromUser) is "buying back" their equity
+      addBalance(settlement.fromUser.id, settlement.amount);
+      
+      // The person receiving (toUser) is "cashing out" their equity
+      addBalance(settlement.toUser.id, -settlement.amount);
+    });
+
+    return netBalances;
+  };
+
+  // Calculate total paid by each user (including settlements)
   const calculateTotalPaid = () => {
     const paidMap = new Map();
     
+    // Expenses
     expenses.forEach(expense => {
       if (expense.paidByData) {
         try {
@@ -37,6 +93,11 @@ export default function Statistics({ expenses, balances, group, currentUser }) {
       }
     });
 
+    // Add settlements (fromUser paid)
+    settlements.forEach(settlement => {
+      paidMap.set(settlement.fromUser.id, (paidMap.get(settlement.fromUser.id) || 0) + settlement.amount);
+    });
+
     return Array.from(paidMap.entries())
       .map(([userId, amount]) => {
         const member = group.members.find(m => m.id === userId);
@@ -49,7 +110,7 @@ export default function Statistics({ expenses, balances, group, currentUser }) {
       .sort((a, b) => b.amount - a.amount);
   };
 
-  // Calculate fair share for each user
+  // Calculate fair share for each user (from splits only)
   const calculateFairShare = () => {
     const shareMap = new Map();
     
@@ -71,9 +132,29 @@ export default function Statistics({ expenses, balances, group, currentUser }) {
       .sort((a, b) => b.amount - a.amount);
   };
 
+  // Get current owes from net balances
+  const getCurrentOwes = () => {
+    const netBalances = calculateNetBalances();
+    const owesList = [];
+
+    for (const [userId, balance] of netBalances.entries()) {
+      if (balance < -0.01) { // They owe money
+        const member = group.members.find(m => m.id === userId);
+        owesList.push({
+          userId,
+          name: userId === currentUser?.id ? 'You' : (member?.name || member?.phone?.slice(-4) || 'Unknown'),
+          amount: Math.abs(balance)
+        });
+      }
+    }
+
+    return owesList.sort((a, b) => b.amount - a.amount);
+  };
+
   const totalPaidList = calculateTotalPaid();
   const fairShareList = calculateFairShare();
-  const hasOutstandingDebts = balances && balances.some(b => b.owes && b.owes.length > 0);
+  const currentOwesList = getCurrentOwes();
+  const hasOutstandingDebts = currentOwesList.length > 0;
 
   return (
     <div className="px-6 py-5 border-b border-[var(--color-border-subtle)]">
@@ -116,18 +197,12 @@ export default function Statistics({ expenses, balances, group, currentUser }) {
           </p>
           {hasOutstandingDebts ? (
             <div className="space-y-2">
-              {balances
-                .filter(b => b.owes && b.owes.length > 0)
-                .map(balance => {
-                  const totalOwed = balance.owes.reduce((sum, debt) => sum + debt.amount, 0);
-                  const userName = balance.userId === currentUser?.id ? 'You' : balance.userName;
-                  return (
-                    <div key={balance.userId} className="flex items-center justify-between py-2 px-3 bg-[var(--color-surface)] rounded-lg">
-                      <span className="text-sm text-[var(--color-text-primary)]">{userName}</span>
-                      <span className="text-sm font-medium text-[var(--color-error)] rupee">{formatAmount(totalOwed)}</span>
-                    </div>
-                  );
-                })}
+              {currentOwesList.map(item => (
+                <div key={item.userId} className="flex items-center justify-between py-2 px-3 bg-[var(--color-surface)] rounded-lg">
+                  <span className="text-sm text-[var(--color-text-primary)]">{item.name}</span>
+                  <span className="text-sm font-medium text-[var(--color-error)] rupee">{formatAmount(item.amount)}</span>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="py-3 px-3 bg-[var(--color-success)]/10 rounded-lg">

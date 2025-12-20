@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { getGroupDetails, getExpenses, getGroupBalances, getSettlements } from '../api/groups';
+import { getGroupDetails, getExpenses, getGroupBalances, getSettlements, updateExpense, deleteExpense, updateSettlement, deleteSettlement } from '../api/groups';
 import { useAuth } from '../context/AuthContext';
 import Toast from '../components/Toast';
 import SettleUpModal from '../components/SettleUpModal';
 import Statistics from '../components/Statistics';
+import EditExpenseModal from '../components/EditExpenseModal';
+import EditSettlementModal from '../components/EditSettlementModal';
 
 export default function GroupDetail() {
   const { groupId } = useParams();
@@ -14,6 +16,7 @@ export default function GroupDetail() {
   
   const [group, setGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
+  const [settlements, setSettlements] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]); // Combined expenses + settlements
   const [balances, setBalances] = useState(null);
   const [currentUserBalance, setCurrentUserBalance] = useState(0);
@@ -25,6 +28,8 @@ export default function GroupDetail() {
   const [showSettlementPicker, setShowSettlementPicker] = useState(false);
   const [selectedSettlement, setSelectedSettlement] = useState(null);
   const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' or 'statistics'
+  const [editingExpense, setEditingExpense] = useState(null);
+  const [editingSettlement, setEditingSettlement] = useState(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -41,6 +46,7 @@ export default function GroupDetail() {
       const settlementsData = settlementsRes.settlements || [];
       
       setExpenses(expensesData);
+      setSettlements(settlementsData);
       
       // Combine expenses and settlements into activity feed, sorted by date
       const combinedFeed = [
@@ -143,6 +149,50 @@ export default function GroupDetail() {
       : (settlement.toUser.name || settlement.toUser.phone?.slice(-4) || 'someone');
     
     return `${fromName} paid ${toName}`;
+  };
+
+  const handleUpdateExpense = async (expenseId, updates) => {
+    try {
+      await updateExpense(groupId, expenseId, updates);
+      setToastMessage('Expense updated');
+      setShowToast(true);
+      await loadData();
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const handleDeleteExpense = async (expenseId) => {
+    try {
+      await deleteExpense(groupId, expenseId);
+      setToastMessage('Expense deleted');
+      setShowToast(true);
+      await loadData();
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const handleUpdateSettlement = async (settlementId, updates) => {
+    try {
+      await updateSettlement(groupId, settlementId, updates);
+      setToastMessage('Settlement updated');
+      setShowToast(true);
+      await loadData();
+    } catch (err) {
+      throw err;
+    }
+  };
+
+  const handleDeleteSettlement = async (settlementId) => {
+    try {
+      await deleteSettlement(groupId, settlementId);
+      setToastMessage('Settlement deleted');
+      setShowToast(true);
+      await loadData();
+    } catch (err) {
+      throw err;
+    }
   };
 
   if (isLoading) {
@@ -369,10 +419,22 @@ export default function GroupDetail() {
                           </p>
                         )}
                       </div>
-                      {/* Timestamp - Very subtle */}
-                      <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap pt-1">
-                        {formatTime(item.createdAt)}
-                      </span>
+                      <div className="flex flex-col items-end gap-2">
+                        {/* Timestamp - Very subtle */}
+                        <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap">
+                          {formatTime(item.createdAt)}
+                        </span>
+                        {/* Edit button - anyone can edit */}
+                        <button
+                          onClick={() => setEditingExpense(item)}
+                          className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-surface)] rounded-lg transition-all"
+                          title="Edit expense"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     /* Settlement Item */
@@ -402,10 +464,22 @@ export default function GroupDetail() {
                           </p>
                         )}
                       </div>
-                      {/* Timestamp */}
-                      <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap pt-1">
-                        {formatTime(item.createdAt)}
-                      </span>
+                      <div className="flex flex-col items-end gap-2">
+                        {/* Timestamp */}
+                        <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap">
+                          {formatTime(item.createdAt)}
+                        </span>
+                        {/* Edit button - anyone can edit */}
+                        <button
+                          onClick={() => setEditingSettlement(item)}
+                          className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-surface)] rounded-lg transition-all"
+                          title="Edit settlement"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -434,6 +508,7 @@ export default function GroupDetail() {
             {hasExpenses ? (
               <Statistics 
                 expenses={expenses}
+                settlements={settlements}
                 balances={balances}
                 group={group}
                 currentUser={user}
@@ -581,6 +656,26 @@ export default function GroupDetail() {
             setShowToast(true);
             loadData(); // Reload to update balances
           }}
+        />
+      )}
+
+      {editingExpense && (
+        <EditExpenseModal
+          expense={editingExpense}
+          group={group}
+          onClose={() => setEditingExpense(null)}
+          onSave={(updates) => handleUpdateExpense(editingExpense.id, updates)}
+          onDelete={() => handleDeleteExpense(editingExpense.id)}
+        />
+      )}
+
+      {editingSettlement && (
+        <EditSettlementModal
+          settlement={editingSettlement}
+          group={group}
+          onClose={() => setEditingSettlement(null)}
+          onSave={(updates) => handleUpdateSettlement(editingSettlement.id, updates)}
+          onDelete={() => handleDeleteSettlement(editingSettlement.id)}
         />
       )}
     </div>

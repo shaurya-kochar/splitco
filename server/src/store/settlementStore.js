@@ -32,3 +32,24 @@ export function getGroupSettlements(groupId) {
 export function deleteSettlement(settlementId) {
   return settlementStore.delete(settlementId);
 }
+
+export function getSettlementById(settlementId) {
+  return settlementStore.get(settlementId) || null;
+}
+
+export function updateSettlement(settlementId, updates) {
+  const settlement = settlementStore.get(settlementId);
+  if (!settlement) return null;
+  
+  const updatedSettlement = {
+    ...settlement,
+    ...updates,
+    id: settlement.id, // Preserve original ID
+    groupId: settlement.groupId, // Preserve original groupId
+    createdAt: settlement.createdAt, // Preserve original createdAt
+    updatedAt: new Date().toISOString()
+  };
+  
+  settlementStore.set(settlementId, updatedSettlement);
+  return updatedSettlement;
+}

@@ -41,3 +41,20 @@ export function getExpenseById(id) {
 export function deleteExpense(id) {
   return expenses.delete(id);
 }
+
+export function updateExpense(id, updates) {
+  const expense = expenses.get(id);
+  if (!expense) return null;
+  
+  const updatedExpense = {
+    ...expense,
+    ...updates,
+    id, // Preserve original ID
+    groupId: expense.groupId, // Preserve original groupId
+    createdAt: expense.createdAt, // Preserve original createdAt
+    updatedAt: new Date().toISOString()
+  };
+  
+  expenses.set(id, updatedExpense);
+  return updatedExpense;
+}
