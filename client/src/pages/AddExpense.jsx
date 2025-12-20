@@ -73,8 +73,8 @@ export default function AddExpense() {
       return;
     }
 
-    // Navigate to split screen with expense data
-    navigate(`/group/${groupId}/add-expense/split`, {
+    // Navigate to who-paid screen with expense data
+    navigate(`/group/${groupId}/add-expense/who-paid`, {
       state: {
         expenseData: {
           amount: numAmount,

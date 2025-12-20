@@ -16,6 +16,7 @@ export function createUser(phone) {
     id: crypto.randomUUID(),
     phone,
     name: '',
+    email: null,
     createdAt: new Date().toISOString()
   };
   userStore.set(phone, user);

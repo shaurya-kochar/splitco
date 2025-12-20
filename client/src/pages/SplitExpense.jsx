@@ -96,13 +96,23 @@ export default function SplitExpense() {
         if (split.userId === userId) {
           return { 
             ...split, 
-            shareAmount: numValue,
-            isIncluded: numValue > 0
+            shareAmount: numValue
+            // Don't change isIncluded here - only change on blur
           };
         }
         return split;
       }));
     }
+  };
+
+  const handleCustomAmountBlur = (userId) => {
+    // On blur, deselect member if amount is 0
+    setMemberSplits(prev => prev.map(split => {
+      if (split.userId === userId && split.shareAmount === 0) {
+        return { ...split, isIncluded: false };
+      }
+      return split;
+    }));
   };
 
   const handleSwitchToCustom = () => {
@@ -160,6 +170,7 @@ export default function SplitExpense() {
       await createExpense(groupId, {
         amount: expenseData.amount,
         description: expenseData.description,
+        paidBy: expenseData.paidBy, // Pass paidBy data from WhoPaid page
         splits
       });
 
@@ -327,6 +338,7 @@ export default function SplitExpense() {
                             inputMode="decimal"
                             value={split.shareAmount || ''}
                             onChange={(e) => handleCustomAmountChange(split.userId, e.target.value)}
+                            onBlur={() => handleCustomAmountBlur(split.userId)}
                             className="w-20 text-right bg-transparent text-[var(--color-text-primary)] font-medium focus:outline-none border-b border-[var(--color-border)] focus:border-[var(--color-accent)] transition-colors"
                             placeholder="0"
                           />

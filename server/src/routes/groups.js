@@ -3,10 +3,10 @@ import { authMiddleware } from '../middleware/auth.js';
 import { createGroup, getGroupById, getAllGroups } from '../store/groupStore.js';
 import { addMember, isMember, getGroupMembers, getUserGroups, findDirectGroup } from '../store/memberStore.js';
 import { findUserByPhone, findUserById, findOrCreateUser } from '../store/userStore.js';
-import { createExpense, getExpensesByGroup, getExpenseById, deleteExpense } from '../store/expenseStore.js';
+import { createExpense, getExpensesByGroup, getExpenseById, deleteExpense, updateExpense } from '../store/expenseStore.js';
 import { createExpenseSplits, getSplitsByExpenses, validateSplits, deleteSplitsForExpense } from '../store/expenseSplitStore.js';
 import { calculateGroupBalances, getSettlementPlan } from '../store/balanceCalculator.js';
-import { createSettlement, getGroupSettlements } from '../store/settlementStore.js';
+import { createSettlement, getGroupSettlements, deleteSettlement, getSettlementById, updateSettlement } from '../store/settlementStore.js';
 
 const router = Router();
 
@@ -327,7 +327,7 @@ router.post('/direct', authMiddleware, (req, res) => {
 router.post('/:groupId/expenses', authMiddleware, (req, res) => {
   try {
     const { groupId } = req.params;
-    const { amount, description, splits } = req.body;
+    const { amount, description, splits, paidBy } = req.body;
     const userId = req.user.id;
 
     // Validate group exists
@@ -390,11 +390,34 @@ router.post('/:groupId/expenses', authMiddleware, (req, res) => {
       }
     }
 
+    // Handle paidBy - default to current user if not provided
+    let paidByUserId = userId;
+    let paidByData = { mode: 'single', userId };
+    
+    if (paidBy) {
+      if (paidBy.mode === 'single') {
+        paidByUserId = paidBy.userId;
+        paidByData = paidBy;
+      } else if (paidBy.mode === 'multiple') {
+        // Validate multiple payers
+        const paymentSum = paidBy.payments.reduce((sum, p) => sum + p.amount, 0);
+        if (Math.abs(paymentSum - amount) >= 0.01) {
+          return res.status(400).json({
+            success: false,
+            error: 'Payment amounts must sum to total amount'
+          });
+        }
+        paidByUserId = paidBy.payments[0].userId; // Use first payer as primary
+        paidByData = paidBy;
+      }
+    }
+
     // Create expense
     const expense = createExpense({
       groupId,
       amount,
-      paidBy: userId,
+      paidBy: paidByUserId,
+      paidByData: JSON.stringify(paidByData), // Store full payment data
       description: description?.trim() || null
     });
 
@@ -402,7 +425,7 @@ router.post('/:groupId/expenses', authMiddleware, (req, res) => {
     const splitRecords = createExpenseSplits(expense.id, splits);
 
     // Get payer details
-    const payer = findUserById(userId);
+    const payer = findUserById(paidByUserId);
 
     res.json({
       success: true,
@@ -411,10 +434,11 @@ router.post('/:groupId/expenses', authMiddleware, (req, res) => {
         groupId: expense.groupId,
         amount: expense.amount,
         paidBy: {
-          id: userId,
+          id: paidByUserId,
           phone: payer?.phone || 'Unknown',
           name: payer?.name || ''
         },
+        paidByData: paidByData,
         description: expense.description,
         createdAt: expense.createdAt,
         splits: splitRecords.map(split => ({
@@ -477,6 +501,7 @@ router.get('/:groupId/expenses', authMiddleware, (req, res) => {
           phone: payer?.phone || 'Unknown',
           name: payer?.name || ''
         },
+        paidByData: expense.paidByData, // Include multi-payer data if present
         description: expense.description,
         createdAt: expense.createdAt,
         splits: splits.map(split => {
@@ -598,8 +623,8 @@ router.get('/:groupId/balances', authMiddleware, (req, res) => {
 router.post('/:groupId/settlements', authMiddleware, (req, res) => {
   try {
     const { groupId } = req.params;
-    const { toUserId, amount, method = 'manual' } = req.body;
-    const fromUserId = req.user.id;
+    const { fromUserId, toUserId, amount, method = 'manual' } = req.body;
+    const currentUserId = req.user.id;
 
     // Validate group exists
     const group = getGroupById(groupId);
@@ -610,15 +635,30 @@ router.post('/:groupId/settlements', authMiddleware, (req, res) => {
       });
     }
 
-    // Validate user is a member
-    if (!isMember(groupId, fromUserId)) {
+    // Validate current user is a member
+    if (!isMember(groupId, currentUserId)) {
       return res.status(403).json({
         success: false,
         error: 'Not a member of this group'
       });
     }
+    
+    // Validate fromUserId and toUserId are provided
+    if (!fromUserId || !toUserId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both fromUserId and toUserId are required'
+      });
+    }
 
-    // Validate recipient is a member
+    // Validate both users are members
+    if (!isMember(groupId, fromUserId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payer is not a member of this group'
+      });
+    }
+
     if (!isMember(groupId, toUserId)) {
       return res.status(400).json({
         success: false,
@@ -717,13 +757,15 @@ router.get('/:groupId/settlements', authMiddleware, (req, res) => {
       return {
         id: settlement.id,
         groupId: settlement.groupId,
-        from: {
+        fromUser: {
           id: settlement.fromUserId,
-          name: fromUser?.name || fromUser?.phone || 'Unknown'
+          name: fromUser?.name || '',
+          phone: fromUser?.phone || ''
         },
-        to: {
+        toUser: {
           id: settlement.toUserId,
-          name: toUser?.name || toUser?.phone || 'Unknown'
+          name: toUser?.name || '',
+          phone: toUser?.phone || ''
         },
         amount: settlement.amount,
         method: settlement.method,
@@ -785,14 +827,6 @@ router.delete('/:groupId/expenses/:expenseId', authMiddleware, (req, res) => {
       });
     }
 
-    // Only the person who created the expense can delete it
-    if (expense.paidBy !== userId) {
-      return res.status(403).json({
-        success: false,
-        error: 'Only the expense creator can delete it'
-      });
-    }
-
     // Delete splits first
     deleteSplitsForExpense(expenseId);
     
@@ -809,6 +843,432 @@ router.delete('/:groupId/expenses/:expenseId', authMiddleware, (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to delete expense'
+    });
+  }
+});
+
+// PUT /groups/:groupId/expenses/:expenseId - Update an expense
+router.put('/:groupId/expenses/:expenseId', authMiddleware, (req, res) => {
+  try {
+    const { groupId, expenseId } = req.params;
+    const userId = req.user.id;
+    const { amount, description, paidByData, paidBy, splits } = req.body;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Get expense
+    const expense = getExpenseById(expenseId);
+    if (!expense) {
+      return res.status(404).json({
+        success: false,
+        error: 'Expense not found'
+      });
+    }
+
+    // Verify expense belongs to this group
+    if (expense.groupId !== groupId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Expense does not belong to this group'
+      });
+    }
+
+    // Validate amount if provided
+    if (amount !== undefined) {
+      const parsedAmount = Number(amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid amount'
+        });
+      }
+    }
+
+    // Update expense
+    const updates = {};
+    if (amount !== undefined) updates.amount = Number(amount);
+    if (description !== undefined) updates.description = description;
+    if (paidByData !== undefined) updates.paidByData = paidByData;
+    if (paidBy !== undefined) updates.paidBy = paidBy;
+
+    const updatedExpense = updateExpense(expenseId, updates);
+
+    // Update splits if provided
+    if (splits && Array.isArray(splits)) {
+      // Validate splits
+      const validation = validateSplits(splits, updatedExpense.amount);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: validation.error
+        });
+      }
+
+      // Delete old splits and create new ones
+      deleteSplitsForExpense(expenseId);
+      createExpenseSplits(expenseId, splits);
+    }
+
+    res.json({
+      success: true,
+      expense: updatedExpense
+    });
+
+  } catch (error) {
+    console.error('Update expense error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update expense'
+    });
+  }
+});
+
+// DELETE /groups/:groupId/settlements/:settlementId - Delete a settlement
+router.delete('/:groupId/settlements/:settlementId', authMiddleware, (req, res) => {
+  try {
+    const { groupId, settlementId } = req.params;
+    const userId = req.user.id;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Get settlement
+    const settlement = getSettlementById(settlementId);
+    if (!settlement) {
+      return res.status(404).json({
+        success: false,
+        error: 'Settlement not found'
+      });
+    }
+
+    // Verify settlement belongs to this group
+    if (settlement.groupId !== groupId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Settlement does not belong to this group'
+      });
+    }
+
+    // Delete settlement
+    deleteSettlement(settlementId);
+
+    res.json({
+      success: true,
+      message: 'Settlement deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete settlement error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete settlement'
+    });
+  }
+});
+
+// PUT /groups/:groupId/settlements/:settlementId - Update a settlement
+router.put('/:groupId/settlements/:settlementId', authMiddleware, (req, res) => {
+  try {
+    const { groupId, settlementId } = req.params;
+    const userId = req.user.id;
+    const { amount, fromUserId, toUserId } = req.body;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Get settlement
+    const settlement = getSettlementById(settlementId);
+    if (!settlement) {
+      return res.status(404).json({
+        success: false,
+        error: 'Settlement not found'
+      });
+    }
+
+    // Verify settlement belongs to this group
+    if (settlement.groupId !== groupId) {
+      return res.status(403).json({
+        success: false,
+        error: 'Settlement does not belong to this group'
+      });
+    }
+
+    // Validate amount if provided
+    if (amount !== undefined) {
+      const parsedAmount = Number(amount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid amount'
+        });
+      }
+    }
+
+    // Validate users if provided
+    if (fromUserId && !isMember(groupId, fromUserId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'From user is not a member of this group'
+      });
+    }
+
+    if (toUserId && !isMember(groupId, toUserId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'To user is not a member of this group'
+      });
+    }
+
+    // Update settlement
+    const updates = {};
+    if (amount !== undefined) updates.amount = Number(amount);
+    if (fromUserId !== undefined) updates.fromUserId = fromUserId;
+    if (toUserId !== undefined) updates.toUserId = toUserId;
+
+    const updatedSettlement = updateSettlement(settlementId, updates);
+
+    res.json({
+      success: true,
+      settlement: updatedSettlement
+    });
+
+  } catch (error) {
+    console.error('Update settlement error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update settlement'
+    });
+  }
+});
+
+// GET /groups/:groupId/export/csv - Export group data as CSV
+router.get('/:groupId/export/csv', authMiddleware, (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Get all data
+    const expenses = getExpensesByGroup(groupId);
+    const settlements = getGroupSettlements(groupId);
+    const members = getGroupMembers(groupId);
+
+    // Build member map for name lookup
+    const memberMap = new Map();
+    for (const member of members) {
+      const user = findUserById(member.userId);
+      if (user) {
+        memberMap.set(user.id, user.name || user.phone);
+      }
+    }
+
+    // Create CSV content
+    let csv = 'Group Name,' + group.name + '\n';
+    csv += 'Export Date,' + new Date().toISOString() + '\n\n';
+
+    // Expenses section
+    csv += 'EXPENSES\n';
+    csv += 'Date,Amount,Paid By,Description,Splits\n';
+    
+    for (const expense of expenses) {
+      const date = new Date(expense.createdAt).toLocaleDateString();
+      const paidByName = memberMap.get(expense.paidBy) || expense.paidBy;
+      const desc = (expense.description || 'No description').replace(/,/g, ';');
+      
+      // Get splits info
+      const expenseSplits = getSplitsByExpenses([expense.id]);
+      const splitInfo = expenseSplits
+        .map(s => `${memberMap.get(s.userId) || s.userId}: ₹${s.shareAmount}`)
+        .join(' | ');
+      
+      csv += `${date},₹${expense.amount},${paidByName},"${desc}","${splitInfo}"\n`;
+    }
+
+    // Settlements section
+    csv += '\nSETTLEMENTS\n';
+    csv += 'Date,Amount,From,To\n';
+    
+    for (const settlement of settlements) {
+      const date = new Date(settlement.createdAt).toLocaleDateString();
+      const fromName = memberMap.get(settlement.fromUserId) || settlement.fromUserId;
+      const toName = memberMap.get(settlement.toUserId) || settlement.toUserId;
+      
+      csv += `${date},₹${settlement.amount},${fromName},${toName}\n`;
+    }
+
+    // Send CSV
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="splitco_${group.name}_${Date.now()}.csv"`);
+    res.send(csv);
+
+  } catch (error) {
+    console.error('Export CSV error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to export CSV'
+    });
+  }
+});
+
+// GET /groups/:groupId/export/json - Export group data as JSON (useful for PDF generation on frontend)
+router.get('/:groupId/export/json', authMiddleware, (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const userId = req.user.id;
+
+    // Validate group exists
+    const group = getGroupById(groupId);
+    if (!group) {
+      return res.status(404).json({
+        success: false,
+        error: 'Group not found'
+      });
+    }
+
+    // Validate user is a member
+    if (!isMember(groupId, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not a member of this group'
+      });
+    }
+
+    // Get all data
+    const expenses = getExpensesByGroup(groupId);
+    const settlements = getGroupSettlements(groupId);
+    const members = getGroupMembers(groupId);
+    const balances = calculateGroupBalances(expenses, settlements);
+
+    // Build member details
+    const memberDetails = members.map(m => {
+      const user = findUserById(m.userId);
+      return {
+        id: m.userId,
+        name: user?.name || user?.phone || 'Unknown',
+        phone: user?.phone,
+        joinedAt: m.joinedAt
+      };
+    });
+
+    // Add splits to expenses
+    const expensesWithSplits = expenses.map(expense => {
+      const splits = getSplitsByExpenses([expense.id]);
+      return {
+        ...expense,
+        splits: splits.map(s => {
+          const user = findUserById(s.userId);
+          return {
+            userId: s.userId,
+            userName: user?.name || user?.phone || 'Unknown',
+            shareAmount: s.shareAmount
+          };
+        })
+      };
+    });
+
+    // Add names to settlements
+    const settlementsWithNames = settlements.map(settlement => {
+      const fromUser = findUserById(settlement.fromUserId);
+      const toUser = findUserById(settlement.toUserId);
+      return {
+        ...settlement,
+        fromUserName: fromUser?.name || fromUser?.phone || 'Unknown',
+        toUserName: toUser?.name || toUser?.phone || 'Unknown'
+      };
+    });
+
+    // Convert balances to array
+    const balanceArray = [];
+    for (const [userId, data] of balances.entries()) {
+      const user = findUserById(userId);
+      balanceArray.push({
+        userId,
+        userName: user?.name || user?.phone || 'Unknown',
+        balance: data.balance
+      });
+    }
+
+    res.json({
+      success: true,
+      exportData: {
+        group: {
+          id: group.id,
+          name: group.name,
+          type: group.type,
+          createdAt: group.createdAt
+        },
+        members: memberDetails,
+        expenses: expensesWithSplits,
+        settlements: settlementsWithNames,
+        balances: balanceArray,
+        exportDate: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('Export JSON error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to export data'
     });
   }
 });

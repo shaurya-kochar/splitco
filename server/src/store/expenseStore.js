@@ -3,13 +3,14 @@
 
 const expenses = new Map();
 
-export function createExpense({ groupId, amount, paidBy, description }) {
+export function createExpense({ groupId, amount, paidBy, paidByData, description }) {
   const id = crypto.randomUUID();
   const expense = {
     id,
     groupId,
     amount,
     paidBy,
+    paidByData: paidByData || null, // Store payment mode data
     description: description || null,
     createdAt: new Date().toISOString()
   };
@@ -39,4 +40,21 @@ export function getExpenseById(id) {
 
 export function deleteExpense(id) {
   return expenses.delete(id);
+}
+
+export function updateExpense(id, updates) {
+  const expense = expenses.get(id);
+  if (!expense) return null;
+  
+  const updatedExpense = {
+    ...expense,
+    ...updates,
+    id, // Preserve original ID
+    groupId: expense.groupId, // Preserve original groupId
+    createdAt: expense.createdAt, // Preserve original createdAt
+    updatedAt: new Date().toISOString()
+  };
+  
+  expenses.set(id, updatedExpense);
+  return updatedExpense;
 }

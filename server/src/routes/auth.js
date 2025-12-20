@@ -65,7 +65,7 @@ router.post('/send-otp', async (req, res) => {
 // POST /auth/verify-otp
 router.post('/verify-otp', async (req, res) => {
   try {
-    const { phone, otp } = req.body;
+    const { phone, otp, name, email } = req.body;
     
     if (!phone || !isValidPhone(phone)) {
       return res.status(400).json({
@@ -114,6 +114,16 @@ router.post('/verify-otp', async (req, res) => {
     // Find or create user
     const user = findOrCreateUser(phone);
     
+    // Update name if provided
+    if (name && name.trim()) {
+      user.name = name.trim();
+    }
+    
+    // Update email if provided
+    if (email && email.trim()) {
+      user.email = email.trim();
+    }
+    
     // Create session
     const session = createSession(user.id);
     
@@ -123,6 +133,7 @@ router.post('/verify-otp', async (req, res) => {
         id: user.id,
         phone: user.phone,
         name: user.name,
+        email: user.email,
         createdAt: user.createdAt
       },
       token: session.token,

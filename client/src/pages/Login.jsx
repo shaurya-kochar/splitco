@@ -5,12 +5,15 @@ import Button from '../components/Button';
 import { sendOtp } from '../api/auth';
 
 export default function Login() {
+  const [username, setUsername] = useState('');
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
   const isValidPhone = phone.length === 10 && /^\d+$/.test(phone);
+  const isValidUsername = username.trim().length >= 2;
 
   const handlePhoneChange = (e) => {
     const value = e.target.value.replace(/\D/g, '').slice(0, 10);
@@ -20,7 +23,7 @@ export default function Login() {
 
   const handleContinue = async (e) => {
     e.preventDefault();
-    if (!isValidPhone || isLoading) return;
+    if (!isValidPhone || !isValidUsername || isLoading) return;
 
     setIsLoading(true);
     setError('');
@@ -28,7 +31,13 @@ export default function Login() {
     try {
       const fullPhone = `+91${phone}`;
       await sendOtp(fullPhone);
-      navigate('/verify', { state: { phone: fullPhone } });
+      navigate('/verify', { 
+        state: { 
+          phone: fullPhone,
+          username: username.trim(),
+          email: email.trim() || null
+        } 
+      });
     } catch (err) {
       setError(err.message || 'Failed to send OTP. Please try again.');
     } finally {
@@ -52,6 +61,29 @@ export default function Login() {
 
           {/* Form */}
           <form onSubmit={handleContinue} className="space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
+                Your name
+              </label>
+              <input
+                type="text"
+                autoComplete="name"
+                value={username}
+                onChange={(e) => {
+                  setUsername(e.target.value);
+                  setError('');
+                }}
+                placeholder="Enter your name"
+                maxLength={50}
+                disabled={isLoading}
+                className={`w-full py-4 px-4 bg-[var(--color-surface)] border rounded-xl text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] transition-colors disabled:opacity-50 ${
+                  error 
+                    ? 'border-[var(--color-error)]' 
+                    : 'border-[var(--color-border)] focus:border-[var(--color-accent)]'
+                }`}
+              />
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
                 Phone number
@@ -78,7 +110,25 @@ export default function Login() {
               )}
             </div>
 
-            <Button type="submit" disabled={!isValidPhone || isLoading}>
+            <div>
+              <label className="block text-sm font-medium text-[var(--color-text-secondary)] mb-2">
+                Email <span className="text-[var(--color-text-muted)] font-normal">(optional)</span>
+              </label>
+              <input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setError('');
+                }}
+                placeholder="your@email.com"
+                disabled={isLoading}
+                className="w-full py-4 px-4 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] transition-colors disabled:opacity-50"
+              />
+            </div>
+
+            <Button type="submit" disabled={!isValidPhone || !isValidUsername || isLoading}>
               {isLoading ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

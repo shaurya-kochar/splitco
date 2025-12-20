@@ -56,10 +56,10 @@ export async function createDirectSplit(phone) {
 }
 
 // Create an expense in a group
-export async function createExpense(groupId, { amount, description, splits }) {
+export async function createExpense(groupId, { amount, description, splits, paidBy }) {
   return request(`/groups/${groupId}/expenses`, {
     method: 'POST',
-    body: JSON.stringify({ amount, description, splits }),
+    body: JSON.stringify({ amount, description, splits, paidBy }),
   });
 }
 
@@ -74,11 +74,16 @@ export async function getGroupBalances(groupId) {
 }
 
 // Create a settlement
-export async function createSettlement(groupId, { toUserId, amount, method = 'manual' }) {
+export async function createSettlement(groupId, { fromUserId, toUserId, amount, method = 'manual' }) {
   return request(`/groups/${groupId}/settlements`, {
     method: 'POST',
-    body: JSON.stringify({ toUserId, amount, method }),
+    body: JSON.stringify({ fromUserId, toUserId, amount, method }),
   });
+}
+
+// Get settlements for a group
+export async function getSettlements(groupId) {
+  return request(`/groups/${groupId}/settlements`);
 }
 
 // Delete an expense
@@ -86,4 +91,48 @@ export async function deleteExpense(groupId, expenseId) {
   return request(`/groups/${groupId}/expenses/${expenseId}`, {
     method: 'DELETE',
   });
+}
+
+// Update an expense
+export async function updateExpense(groupId, expenseId, updates) {
+  return request(`/groups/${groupId}/expenses/${expenseId}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+// Delete a settlement
+export async function deleteSettlement(groupId, settlementId) {
+  return request(`/groups/${groupId}/settlements/${settlementId}`, {
+    method: 'DELETE',
+  });
+}
+
+// Update a settlement
+export async function updateSettlement(groupId, settlementId, updates) {
+  return request(`/groups/${groupId}/settlements/${settlementId}`, {
+    method: 'PUT',
+    body: JSON.stringify(updates),
+  });
+}
+
+// Export group data as CSV
+export async function exportCSV(groupId) {
+  const token = localStorage.getItem('splitco_token');
+  const response = await fetch(`${API_BASE}/groups/${groupId}/export/csv`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  
+  if (!response.ok) {
+    throw new Error('Export failed');
+  }
+  
+  return response.blob();
+}
+
+// Export group data as JSON (for PDF generation)
+export async function exportJSON(groupId) {
+  return request(`/groups/${groupId}/export/json`);
 }

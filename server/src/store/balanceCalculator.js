@@ -3,121 +3,130 @@
 
 /**
  * Calculate net balances for all users in a group
- * Returns a map of userId -> balance (positive = gets money, negative = owes money)
+ * Uses a "Pure Net Balance" approach to ensure mathematical accuracy 
+ * across expenses, multi-payers, and settlements.
  * 
  * @param {Array} expenses - Array of expense objects with splits
  * @param {Array} settlements - Array of settlement objects (optional)
  * @returns {Map} userId -> { balance, owes: Map, owedBy: Map }
  */
 export function calculateGroupBalances(expenses, settlements = []) {
+  const netBalances = new Map();
+
+  // Helper to safely update balance
+  const addBalance = (userId, amount) => {
+    const current = netBalances.get(userId) || 0;
+    netBalances.set(userId, current + amount);
+  };
+
+  // 1. Process Expenses
+  for (const expense of expenses) {
+    // A. Handle Payers (They gain equity in the group)
+    // ------------------------------------------------
+    let payers = [];
+    
+    // Parse multi-payer data if it exists
+    if (expense.paidByData) {
+      try {
+        const paidByData = typeof expense.paidByData === 'string' 
+          ? JSON.parse(expense.paidByData) 
+          : expense.paidByData;
+        
+        if (paidByData.mode === 'multiple' && paidByData.payments) {
+          payers = paidByData.payments;
+        } else {
+          payers = [{ userId: expense.paidBy, amount: expense.amount }];
+        }
+      } catch (e) {
+        payers = [{ userId: expense.paidBy, amount: expense.amount }];
+      }
+    } else {
+      payers = [{ userId: expense.paidBy, amount: expense.amount }];
+    }
+
+    // Add amounts to payers' balances
+    for (const payer of payers) {
+      addBalance(payer.userId, payer.amount);
+    }
+
+    // B. Handle Splitters (They lose equity/incur debt)
+    // -------------------------------------------------
+    const splits = expense.splits || [];
+    for (const split of splits) {
+      addBalance(split.userId, -split.shareAmount);
+    }
+  }
+
+  // 2. Process Settlements
+  // -------------------------------------------------
+  for (const settlement of settlements) {
+    // The person paying (fromUser) is "buying back" their equity
+    addBalance(settlement.fromUserId, settlement.amount);
+    
+    // The person receiving (toUser) is "cashing out" their equity
+    addBalance(settlement.toUserId, -settlement.amount);
+  }
+
+  // 3. Prepare Final Structure
+  // -------------------------------------------------
   const balances = new Map();
   
-  // Track who owes whom how much
-  const owesMatrix = new Map(); // userId -> Map(otherUserId -> amount)
-  
-  for (const expense of expenses) {
-    const paidBy = expense.paidBy;
-    const splits = expense.splits || [];
+  // Separate into Debtors (-) and Creditors (+)
+  const debtors = [];
+  const creditors = [];
+
+  for (const [userId, amount] of netBalances.entries()) {
+    // Round to 2 decimals to avoid floating point errors
+    const balance = Math.round(amount * 100) / 100;
     
-    // Each person who has a split owes the payer their share
-    for (const split of splits) {
-      if (split.userId === paidBy) {
-        // Payer doesn't owe themselves
-        continue;
-      }
-      
-      // split.userId owes paidBy the split.shareAmount
-      if (!owesMatrix.has(split.userId)) {
-        owesMatrix.set(split.userId, new Map());
-      }
-      
-      const currentOwed = owesMatrix.get(split.userId).get(paidBy) || 0;
-      owesMatrix.get(split.userId).set(paidBy, currentOwed + split.shareAmount);
-    }
-  }
-  
-  // Apply settlements (reduce debts)
-  for (const settlement of settlements) {
-    const fromUser = settlement.fromUserId;
-    const toUser = settlement.toUserId;
-    const amount = settlement.amount;
-    
-    // Settlement: fromUser paid toUser, so reduce fromUser's debt to toUser
-    if (owesMatrix.has(fromUser) && owesMatrix.get(fromUser).has(toUser)) {
-      const currentDebt = owesMatrix.get(fromUser).get(toUser);
-      const newDebt = currentDebt - amount;
-      
-      if (newDebt <= 0.01) {
-        // Debt fully paid or overpaid
-        owesMatrix.get(fromUser).delete(toUser);
-        
-        if (newDebt < -0.01) {
-          // Overpaid - now toUser owes fromUser
-          if (!owesMatrix.has(toUser)) {
-            owesMatrix.set(toUser, new Map());
-          }
-          owesMatrix.get(toUser).set(fromUser, Math.abs(newDebt));
-        }
-      } else {
-        owesMatrix.get(fromUser).set(toUser, newDebt);
-      }
-    }
-  }
-  
-  // Simplify the debts (net out mutual debts)
-  const users = new Set();
-  for (const userId of owesMatrix.keys()) {
-    users.add(userId);
-  }
-  
-  // Also add all payers
-  for (const expense of expenses) {
-    users.add(expense.paidBy);
-  }
-  
-  // Initialize balance structure for all users
-  for (const userId of users) {
     balances.set(userId, {
-      balance: 0,
-      owes: new Map(), // who this user owes to
-      owedBy: new Map() // who owes this user
+      balance,
+      owes: new Map(),
+      owedBy: new Map()
     });
-  }
-  
-  // Simplify debts by netting out mutual obligations
-  const userArray = Array.from(users);
-  for (let i = 0; i < userArray.length; i++) {
-    for (let j = i + 1; j < userArray.length; j++) {
-      const user1 = userArray[i];
-      const user2 = userArray[j];
-      
-      const user1OwesUser2 = owesMatrix.get(user1)?.get(user2) || 0;
-      const user2OwesUser1 = owesMatrix.get(user2)?.get(user1) || 0;
-      
-      const netDebt = user1OwesUser2 - user2OwesUser1;
-      
-      if (Math.abs(netDebt) < 0.01) {
-        // Effectively zero, skip
-        continue;
-      }
-      
-      if (netDebt > 0) {
-        // user1 owes user2
-        balances.get(user1).owes.set(user2, netDebt);
-        balances.get(user2).owedBy.set(user1, netDebt);
-        balances.get(user1).balance -= netDebt;
-        balances.get(user2).balance += netDebt;
-      } else {
-        // user2 owes user1
-        const absNetDebt = Math.abs(netDebt);
-        balances.get(user2).owes.set(user1, absNetDebt);
-        balances.get(user1).owedBy.set(user2, absNetDebt);
-        balances.get(user2).balance -= absNetDebt;
-        balances.get(user1).balance += absNetDebt;
-      }
+
+    if (Math.abs(balance) < 0.01) continue; // Skip settled users
+
+    if (balance > 0) {
+      creditors.push({ userId, amount: balance });
+    } else {
+      // Store positive magnitude for matching logic
+      debtors.push({ userId, amount: Math.abs(balance) });
     }
   }
-  
+
+  // 4. Greedy Matching Algorithm
+  // -------------------------------------------------
+  // Sort by magnitude (descending) to settle largest debts first
+  debtors.sort((a, b) => b.amount - a.amount);
+  creditors.sort((a, b) => b.amount - a.amount);
+
+  let i = 0; // Debtor index
+  let j = 0; // Creditor index
+
+  while (i < debtors.length && j < creditors.length) {
+    const debtor = debtors[i];
+    const creditor = creditors[j];
+
+    // The amount to settle is the minimum of what's owed vs what's waiting
+    const amountToSettle = Math.min(debtor.amount, creditor.amount);
+    const roundedAmount = Number(amountToSettle.toFixed(2));
+
+    if (roundedAmount > 0) {
+      // Record the simplified debt edge
+      balances.get(debtor.userId).owes.set(creditor.userId, roundedAmount);
+      balances.get(creditor.userId).owedBy.set(debtor.userId, roundedAmount);
+
+      // Adjust temp trackers
+      debtor.amount -= amountToSettle;
+      creditor.amount -= amountToSettle;
+    }
+
+    // Move pointers if fully settled (using epsilon for float safety)
+    if (debtor.amount < 0.01) i++;
+    if (creditor.amount < 0.01) j++;
+  }
+
   return balances;
 }
 

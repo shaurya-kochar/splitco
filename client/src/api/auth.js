@@ -29,10 +29,18 @@ export async function sendOtp(phone) {
   });
 }
 
-export async function verifyOtp(phone, otp) {
+export async function verifyOtp(phone, otp, name = null, email = null) {
+  const body = { phone, otp };
+  if (name) {
+    body.name = name;
+  }
+  if (email) {
+    body.email = email;
+  }
+  
   const data = await request('/auth/verify-otp', {
     method: 'POST',
-    body: JSON.stringify({ phone, otp }),
+    body: JSON.stringify(body),
   });
   
   // Store token
