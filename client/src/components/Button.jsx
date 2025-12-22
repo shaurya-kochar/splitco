@@ -6,18 +6,18 @@ export default function Button({
   type = 'button',
   className = '' 
 }) {
-  const baseStyles = "w-full py-4 px-6 rounded-2xl font-semibold text-base transition-all duration-200";
+  const baseStyles = "w-full py-4 px-6 rounded-2xl font-semibold text-base transition-all duration-200 press-effect";
   
   const variants = {
-    primary: `bg-[var(--color-accent)] text-white shadow-[var(--shadow-md)] ${
+    primary: `bg-[var(--color-accent)] text-[#0a0a0b] ${
       disabled 
         ? 'opacity-40 cursor-not-allowed' 
-        : 'hover:bg-[var(--color-accent-hover)] active:scale-[0.98]'
+        : 'hover:opacity-90 active:scale-[0.98]'
     }`,
-    secondary: `bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border)] shadow-[var(--shadow-sm)] ${
+    secondary: `bg-[var(--color-surface)] text-[var(--color-text-primary)] border border-[var(--color-border)] ${
       disabled 
         ? 'opacity-40 cursor-not-allowed' 
-        : 'hover:bg-[var(--color-accent-subtle)] active:scale-[0.98]'
+        : 'hover:bg-[var(--color-surface-elevated)] active:scale-[0.98]'
     }`,
   };
 

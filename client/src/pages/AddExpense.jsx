@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { getGroupDetails } from '../api/groups';
+import { getGroupDetails, createExpense } from '../api/groups';
 import { useAuth } from '../context/AuthContext';
 
 export default function AddExpense() {
@@ -14,29 +14,48 @@ export default function AddExpense() {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
-  const [isFocused, setIsFocused] = useState(false);
+  const [showPaidByPicker, setShowPaidByPicker] = useState(false);
+  const [showSplitCustomize, setShowSplitCustomize] = useState(false);
+  const [selectedPayer, setSelectedPayer] = useState(null);
+  const [splitMembers, setSplitMembers] = useState([]);
 
   useEffect(() => {
     loadGroup();
-    
-    // Restore state if coming back from split screen
-    if (location.state?.expenseData) {
-      const { amount: savedAmount, description: savedDesc } = location.state.expenseData;
-      setAmount(savedAmount.toString());
-      setDescription(savedDesc || '');
-    }
   }, [groupId]);
 
   useEffect(() => {
-    // Focus amount input after group loads
-    if (!isLoading && amountInputRef.current && !location.state?.expenseData) {
-      setTimeout(() => {
-        amountInputRef.current?.focus();
-        setIsFocused(true);
-      }, 100);
+    if (group && group.members) {
+      // Initialize splits
+      const currentUserMember = group.members.find(m => m.id === user?.id);
+      setSelectedPayer(currentUserMember || group.members[0]);
+      
+      const equalShare = amount ? Number((parseFloat(amount) / group.members.length).toFixed(2)) : 0;
+      setSplitMembers(group.members.map(member => ({
+        ...member,
+        included: true,
+        share: equalShare
+      })));
     }
-  }, [isLoading]);
+  }, [group, user]);
+
+  useEffect(() => {
+    // Recalculate equal splits when amount changes
+    if (group && amount) {
+      const numAmount = parseFloat(amount);
+      if (numAmount > 0) {
+        const includedCount = splitMembers.filter(m => m.included).length;
+        if (includedCount > 0) {
+          const equalShare = Number((numAmount / includedCount).toFixed(2));
+          setSplitMembers(prev => prev.map(member => ({
+            ...member,
+            share: member.included ? equalShare : 0
+          })));
+        }
+      }
+    }
+  }, [amount, group]);
 
   const loadGroup = async () => {
     try {
@@ -49,49 +68,96 @@ export default function AddExpense() {
     }
   };
 
-  const handleAmountChange = (e) => {
-    const value = e.target.value;
-    // Only allow valid number input
+  const handleAmountChange = (value) => {
     if (value === '' || /^\d*\.?\d{0,2}$/.test(value)) {
       setAmount(value);
       setError('');
     }
   };
 
-  const handleContinue = (e) => {
-    e.preventDefault();
-    
-    const numAmount = parseFloat(amount);
-    if (!numAmount || numAmount <= 0) {
-      setError('Enter a valid amount');
-      amountInputRef.current?.focus();
-      return;
+  const handleNumberPad = (key) => {
+    if (key === 'backspace') {
+      setAmount(prev => prev.slice(0, -1));
+    } else if (key === 'clear') {
+      setAmount('');
+    } else if (key === '.') {
+      if (!amount.includes('.')) {
+        setAmount(prev => prev + '.');
+      }
+    } else {
+      setAmount(prev => prev + key);
     }
+  };
 
-    if (numAmount > 10000000) {
-      setError('Amount exceeds limit');
-      return;
-    }
-
-    // Navigate to who-paid screen with expense data
-    navigate(`/group/${groupId}/add-expense/who-paid`, {
-      state: {
-        expenseData: {
-          amount: numAmount,
-          description: description.trim() || null
+  const handleToggleMember = (memberId) => {
+    setSplitMembers(prev => {
+      const updated = prev.map(m => 
+        m.id === memberId ? { ...m, included: !m.included } : m
+      );
+      
+      // Recalculate equal split
+      const numAmount = parseFloat(amount);
+      if (numAmount > 0) {
+        const includedCount = updated.filter(m => m.included).length;
+        if (includedCount > 0) {
+          const equalShare = Number((numAmount / includedCount).toFixed(2));
+          return updated.map(m => ({
+            ...m,
+            share: m.included ? equalShare : 0
+          }));
         }
       }
+      return updated;
     });
   };
 
-  const formatDisplayAmount = (value) => {
-    if (!value) return '';
-    const num = parseFloat(value);
-    if (isNaN(num)) return '';
-    return num.toLocaleString('en-IN', {
+  const handleSave = async () => {
+    const numAmount = parseFloat(amount);
+    if (!numAmount || numAmount <= 0) {
+      setError('Enter a valid amount');
+      return;
+    }
+
+    const includedMembers = splitMembers.filter(m => m.included);
+    if (includedMembers.length === 0) {
+      setError('Select at least one person to split with');
+      return;
+    }
+
+    setIsSaving(true);
+    setError('');
+
+    try {
+      const splits = includedMembers.map(m => ({
+        userId: m.id,
+        shareAmount: m.share
+      }));
+
+      await createExpense(groupId, {
+        amount: numAmount,
+        description: description.trim() || null,
+        paidBy: { mode: 'single', userId: selectedPayer.id },
+        splits
+      });
+
+      navigate(`/group/${groupId}`, {
+        state: { expenseAdded: true },
+        replace: true
+      });
+    } catch (err) {
+      setError(err.message || 'Failed to create expense');
+      setIsSaving(false);
+    }
+  };
+
+  const formatAmount = (amount) => {
+    if (!amount) return '0';
+    const num = parseFloat(amount);
+    if (isNaN(num)) return '0';
+    return new Intl.NumberFormat('en-IN', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2
-    });
+    }).format(num);
   };
 
   if (isLoading) {
@@ -117,11 +183,12 @@ export default function AddExpense() {
   }
 
   const title = group.type === 'direct' ? group.displayName : group.name;
+  const includedCount = splitMembers.filter(m => m.included).length;
 
   return (
     <div className="min-h-dvh flex flex-col bg-[var(--color-bg)]">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-[var(--color-bg)]/90 backdrop-blur-lg border-b border-[var(--color-border)]">
+      <header className="sticky top-0 z-10 bg-[var(--color-bg)]/95 backdrop-blur-lg border-b border-[var(--color-border)]">
         <div className="max-w-lg mx-auto px-6 h-14 flex items-center justify-between">
           <button
             onClick={() => navigate(`/group/${groupId}`)}
@@ -129,123 +196,275 @@ export default function AddExpense() {
           >
             Cancel
           </button>
-          <span className="text-[13px] font-medium text-[var(--color-text-secondary)] truncate max-w-[180px]">
-            {title}
+          <span className="text-[13px] font-semibold text-[var(--color-text-primary)]">
+            Add Expense
           </span>
-          <div className="w-14" />
+          <button
+            onClick={handleSave}
+            disabled={!amount || parseFloat(amount) <= 0 || isSaving}
+            className={`text-[15px] font-semibold transition-colors ${
+              amount && parseFloat(amount) > 0 && !isSaving
+                ? 'text-[var(--color-accent)] hover:text-[var(--color-accent-hover)]'
+                : 'text-[var(--color-text-subtle)] cursor-not-allowed'
+            }`}
+          >
+            {isSaving ? 'Saving...' : 'Done'}
+          </button>
         </div>
       </header>
 
-      <form onSubmit={handleContinue} className="flex-1 flex flex-col max-w-lg mx-auto w-full">
-        {/* Amount Section - Hero */}
-        <div className="flex-1 flex flex-col items-center justify-center px-8 py-12">
-          <div className="w-full max-w-sm animate-fade-in">
-            {/* Amount Display + Input */}
-            <div className="relative mb-8">
-              <div className="flex items-baseline justify-center gap-1 mb-3">
-                <span className="text-[32px] font-light text-[var(--color-text-muted)]">₹</span>
-                <div className="relative flex-1 max-w-[280px]">
-                  <input
-                    ref={amountInputRef}
-                    type="text"
-                    inputMode="decimal"
-                    value={amount}
-                    onChange={handleAmountChange}
-                    onFocus={() => setIsFocused(true)}
-                    onBlur={() => setIsFocused(false)}
-                    placeholder="0"
-                    autoComplete="off"
-                    className="w-full text-[56px] font-semibold text-[var(--color-text-primary)] bg-transparent border-none outline-none text-center placeholder:text-[var(--color-text-subtle)] rupee"
-                    style={{ 
-                      letterSpacing: '-0.02em',
-                      lineHeight: '1',
-                      fontVariantNumeric: 'tabular-nums'
-                    }}
-                  />
-                  {/* Formatted display (shows when not focused and has value) */}
-                  {!isFocused && amount && (
-                    <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                      <span className="text-[56px] font-semibold text-[var(--color-text-primary)] rupee" style={{ letterSpacing: '-0.02em', lineHeight: '1' }}>
-                        {formatDisplayAmount(amount)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              {/* Hint */}
-              <div className="text-center">
-                <p className="text-[13px] text-[var(--color-text-muted)]">
-                  {amount ? 'Tap to edit' : 'Enter the total amount'}
-                </p>
-              </div>
+      <div className="flex-1 flex flex-col max-w-lg mx-auto w-full">
+        {/* Amount Display */}
+        <div className="flex flex-col items-center justify-center px-8 py-12">
+          <div className="text-center mb-2">
+            <div className="flex items-baseline justify-center gap-2">
+              <span className="text-4xl font-light text-[var(--color-text-muted)]">₹</span>
+              <span className="text-6xl font-bold text-[var(--color-text-primary)] rupee tracking-tight">
+                {formatAmount(amount)}
+              </span>
             </div>
-
-            {/* Error Message */}
-            {error && (
-              <div className="text-center mb-6 animate-fade-in">
-                <p className="text-[14px] text-[var(--color-error)] font-medium">
-                  {error}
-                </p>
-              </div>
-            )}
           </div>
+          {error && (
+            <p className="text-sm text-[var(--color-error)] mt-4 animate-fade-in">
+              {error}
+            </p>
+          )}
         </div>
 
         {/* Details Section */}
-        <div className="px-6 pb-6 safe-area-bottom">
-          <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] shadow-[var(--shadow-sm)] overflow-hidden">
-            {/* Paid By */}
-            <div className="flex items-center justify-between px-5 py-4">
-              <span className="text-[15px] text-[var(--color-text-secondary)]">Paid by</span>
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-full bg-[var(--color-accent)] flex items-center justify-center">
-                  <span className="text-[12px] font-semibold text-white">
-                    {(user?.name || 'Y').charAt(0).toUpperCase()}
-                  </span>
-                </div>
-                <span className="text-[15px] font-medium text-[var(--color-text-primary)]">
-                  You
-                </span>
-              </div>
-            </div>
-
-            {/* Divider */}
-            <div className="h-px bg-[var(--color-border-subtle)]" />
-
-            {/* Description */}
-            <div className="px-5 py-4">
-              <input
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What's this for?"
-                maxLength={100}
-                className="w-full text-[15px] bg-transparent text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
-              />
-              <p className="text-[12px] text-[var(--color-text-muted)] mt-1.5">
-                Optional
-              </p>
-            </div>
+        <div className="px-6 space-y-3 mb-6">
+          {/* Description */}
+          <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] p-4">
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What's this for?"
+              maxLength={100}
+              className="w-full text-[15px] bg-transparent text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
+            />
+            <p className="text-[11px] text-[var(--color-text-muted)] mt-1.5">Optional</p>
           </div>
 
-          {/* Continue Button */}
+          {/* Paid By */}
           <button
-            type="submit"
-            disabled={!amount || parseFloat(amount) <= 0}
-            className={`
-              w-full mt-5 py-[15px] px-6 rounded-[14px] font-semibold text-[16px]
-              transition-all duration-200 shadow-[var(--shadow-md)]
-              ${amount && parseFloat(amount) > 0
-                ? 'bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] active:scale-[0.98]'
-                : 'bg-[var(--color-border)] text-[var(--color-text-muted)] cursor-not-allowed shadow-none'
-              }
-            `}
+            onClick={() => setShowPaidByPicker(true)}
+            className="w-full bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] p-4 text-left hover:bg-[var(--color-surface-elevated)] transition-colors"
           >
-            Continue to Split
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--color-accent)] flex items-center justify-center">
+                  <span className="text-sm font-bold text-[#0a0a0b]">
+                    {(selectedPayer?.name || selectedPayer?.phone || 'Y').charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-xs text-[var(--color-text-muted)]">Paid by</p>
+                  <p className="text-[15px] font-semibold text-[var(--color-text-primary)]">
+                    {selectedPayer?.id === user?.id ? 'You' : (selectedPayer?.name || selectedPayer?.phone)}
+                  </p>
+                </div>
+              </div>
+              <svg className="w-5 h-5 text-[var(--color-text-subtle)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </div>
+          </button>
+
+          {/* Split Settings */}
+          <button
+            onClick={() => setShowSplitCustomize(true)}
+            className="w-full bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] p-4 text-left hover:bg-[var(--color-surface-elevated)] transition-colors"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-[var(--color-text-muted)]">Split with</p>
+                <p className="text-[15px] font-semibold text-[var(--color-text-primary)]">
+                  {includedCount} {includedCount === 1 ? 'person' : 'people'} · Equal split
+                </p>
+              </div>
+              <svg className="w-5 h-5 text-[var(--color-text-subtle)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </div>
           </button>
         </div>
-      </form>
+
+        {/* Number Pad */}
+        <div className="px-6 pb-8 mt-auto">
+          <div className="grid grid-cols-4 gap-3">
+            {['1', '2', '3', '←'].map((key) => (
+              <button
+                key={key}
+                onClick={() => key === '←' ? handleNumberPad('backspace') : handleNumberPad(key)}
+                className="aspect-square rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-2xl font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] active:scale-95 transition-all"
+              >
+                {key === '←' ? '⌫' : key}
+              </button>
+            ))}
+            {['4', '5', '6', 'AC'].map((key) => (
+              <button
+                key={key}
+                onClick={() => key === 'AC' ? handleNumberPad('clear') : handleNumberPad(key)}
+                className="aspect-square rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-2xl font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] active:scale-95 transition-all"
+              >
+                {key}
+              </button>
+            ))}
+            {['7', '8', '9', '.'].map((key) => (
+              <button
+                key={key}
+                onClick={() => handleNumberPad(key)}
+                className="aspect-square rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-2xl font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] active:scale-95 transition-all"
+              >
+                {key}
+              </button>
+            ))}
+            <button
+              onClick={() => handleNumberPad('0')}
+              className="col-span-3 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] text-2xl font-semibold text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] active:scale-95 transition-all py-6"
+            >
+              0
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!amount || parseFloat(amount) <= 0 || isSaving}
+              className={`rounded-2xl text-2xl font-bold transition-all py-6 ${
+                amount && parseFloat(amount) > 0 && !isSaving
+                  ? 'bg-[var(--color-accent)] text-[#0a0a0b] hover:bg-[var(--color-accent-hover)] active:scale-95'
+                  : 'bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-subtle)] cursor-not-allowed'
+              }`}
+            >
+              ✓
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Paid By Picker Modal */}
+      {showPaidByPicker && (
+        <div 
+          className="fixed inset-0 z-50 flex items-end bg-black/60 animate-fade-in"
+          onClick={() => setShowPaidByPicker(false)}
+        >
+          <div 
+            className="w-full max-w-lg mx-auto bg-[var(--color-surface)] rounded-t-3xl p-6 animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Who paid?</h3>
+              <button
+                onClick={() => setShowPaidByPicker(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--color-border)] transition-colors"
+              >
+                <svg className="w-5 h-5 text-[var(--color-text-secondary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-2 max-h-96 overflow-auto">
+              {group.members.map((member) => (
+                <button
+                  key={member.id}
+                  onClick={() => {
+                    setSelectedPayer(member);
+                    setShowPaidByPicker(false);
+                  }}
+                  className={`w-full p-4 rounded-xl text-left transition-colors ${
+                    selectedPayer?.id === member.id
+                      ? 'bg-[var(--color-accent-subtle)] border-2 border-[var(--color-accent)]'
+                      : 'bg-[var(--color-surface-elevated)] border-2 border-transparent hover:border-[var(--color-border)]'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[var(--color-accent)] flex items-center justify-center">
+                      <span className="text-sm font-bold text-[#0a0a0b]">
+                        {(member.name || member.phone).charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="font-medium text-[var(--color-text-primary)]">
+                      {member.id === user?.id ? 'You' : (member.name || member.phone)}
+                    </p>
+                    {selectedPayer?.id === member.id && (
+                      <svg className="w-5 h-5 text-[var(--color-accent)] ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Split Customize Modal */}
+      {showSplitCustomize && (
+        <div 
+          className="fixed inset-0 z-50 flex items-end bg-black/60 animate-fade-in"
+          onClick={() => setShowSplitCustomize(false)}
+        >
+          <div 
+            className="w-full max-w-lg mx-auto bg-[var(--color-surface)] rounded-t-3xl p-6 animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Split with</h3>
+              <button
+                onClick={() => setShowSplitCustomize(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--color-border)] transition-colors"
+              >
+                <svg className="w-5 h-5 text-[var(--color-text-secondary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-2 max-h-96 overflow-auto">
+              {splitMembers.map((member) => (
+                <button
+                  key={member.id}
+                  onClick={() => handleToggleMember(member.id)}
+                  className={`w-full p-4 rounded-xl text-left transition-colors ${
+                    member.included
+                      ? 'bg-[var(--color-accent-subtle)] border-2 border-[var(--color-accent)]'
+                      : 'bg-[var(--color-surface-elevated)] border-2 border-transparent opacity-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${
+                        member.included
+                          ? 'bg-[var(--color-accent)] border-[var(--color-accent)]'
+                          : 'border-[var(--color-border)]'
+                      }`}>
+                        {member.included && (
+                          <svg className="w-4 h-4 text-[#0a0a0b]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <p className="font-medium text-[var(--color-text-primary)]">
+                        {member.id === user?.id ? 'You' : (member.name || member.phone)}
+                      </p>
+                    </div>
+                    {member.included && amount && (
+                      <p className="text-sm font-semibold text-[var(--color-accent)]">
+                        ₹{formatAmount(member.share.toString())}
+                      </p>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setShowSplitCustomize(false)}
+              className="w-full mt-6 py-4 bg-[var(--color-accent)] text-[#0a0a0b] rounded-2xl font-semibold hover:bg-[var(--color-accent-hover)] active:scale-98 transition-all"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -11,6 +11,9 @@ import JoinGroup from './pages/JoinGroup';
 import AddExpense from './pages/AddExpense';
 import WhoPaid from './pages/WhoPaid';
 import SplitExpense from './pages/SplitExpense';
+import History from './pages/History';
+import Analytics from './pages/Analytics';
+import Profile from './pages/Profile';
 
 function ProtectedRoute({ children }) {
   const { user, isLoading } = useAuth();
@@ -134,6 +137,30 @@ function AppRoutes() {
       <Route 
         path="/join/:groupId" 
         element={<JoinGroup />} 
+      />
+      <Route 
+        path="/history" 
+        element={
+          <ProtectedRoute>
+            <History />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/analytics" 
+        element={
+          <ProtectedRoute>
+            <Analytics />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/profile" 
+        element={
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        } 
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

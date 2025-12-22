@@ -4,7 +4,7 @@ import { getGroupDetails, getExpenses, getGroupBalances, getSettlements, updateE
 import { useAuth } from '../context/AuthContext';
 import Toast from '../components/Toast';
 import SettleUpModal from '../components/SettleUpModal';
-import Statistics from '../components/Statistics';
+import HeroCard from '../components/HeroCard';
 import EditExpenseModal from '../components/EditExpenseModal';
 import EditSettlementModal from '../components/EditSettlementModal';
 
@@ -17,9 +17,10 @@ export default function GroupDetail() {
   const [group, setGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [settlements, setSettlements] = useState([]);
-  const [activityFeed, setActivityFeed] = useState([]); // Combined expenses + settlements
+  const [activityFeed, setActivityFeed] = useState([]);
   const [balances, setBalances] = useState(null);
   const [currentUserBalance, setCurrentUserBalance] = useState(0);
+  const [totalSpent, setTotalSpent] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showToast, setShowToast] = useState(false);
@@ -27,7 +28,6 @@ export default function GroupDetail() {
   const [showSettleUp, setShowSettleUp] = useState(false);
   const [showSettlementPicker, setShowSettlementPicker] = useState(false);
   const [selectedSettlement, setSelectedSettlement] = useState(null);
-  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard' or 'statistics'
   const [editingExpense, setEditingExpense] = useState(null);
   const [editingSettlement, setEditingSettlement] = useState(null);
 
@@ -48,7 +48,10 @@ export default function GroupDetail() {
       setExpenses(expensesData);
       setSettlements(settlementsData);
       
-      // Combine expenses and settlements into activity feed, sorted by date
+      // Calculate total spent
+      const total = expensesData.reduce((sum, exp) => sum + exp.amount, 0);
+      setTotalSpent(total);
+      
       const combinedFeed = [
         ...expensesData.map(e => ({ ...e, type: 'expense' })),
         ...settlementsData.map(s => ({ ...s, type: 'settlement' }))
@@ -68,22 +71,10 @@ export default function GroupDetail() {
     loadData();
   }, [loadData]);
 
-  // Show success toast if coming back from adding expense
   useEffect(() => {
     if (location.state?.expenseAdded) {
       setToastMessage('Expense added');
       setShowToast(true);
-      // Clear the state to prevent showing toast on refresh
-      window.history.replaceState({}, document.title);
-    }
-  }, [location.state]);
-
-  // Show success toast if coming back from adding expense
-  useEffect(() => {
-    if (location.state?.expenseAdded) {
-      setToastMessage('Expense added');
-      setShowToast(true);
-      // Clear the state to prevent showing toast on refresh
       window.history.replaceState({}, document.title);
     }
   }, [location.state]);
@@ -224,7 +215,7 @@ export default function GroupDetail() {
   return (
     <div className="min-h-dvh flex flex-col bg-[var(--color-bg)]">
       {/* Header */}
-      <header className="sticky top-0 z-10 bg-[var(--color-bg)]/90 backdrop-blur-lg border-b border-[var(--color-border)]">
+      <header className="sticky top-0 z-10 bg-[var(--color-bg)]/95 backdrop-blur-lg border-b border-[var(--color-border)]">
         <div className="max-w-lg mx-auto px-6 h-14 flex items-center justify-between">
           <button
             onClick={() => navigate('/home')}
@@ -262,105 +253,51 @@ export default function GroupDetail() {
         </div>
       </header>
 
-      <div className="flex-1 flex flex-col max-w-lg mx-auto w-full">
-        {/* Tab Navigation */}
-        <div className="flex border-b border-[var(--color-border)]">
-          <button
-            onClick={() => setActiveView('dashboard')}
-            className={`flex-1 py-3 px-4 text-sm font-medium transition-colors ${
-              activeView === 'dashboard'
-                ? 'text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]'
-                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-            }`}
-          >
-            Dashboard
-          </button>
-          <button
-            onClick={() => setActiveView('statistics')}
-            className={`flex-1 py-3 px-4 text-sm font-medium transition-colors ${
-              activeView === 'statistics'
-                ? 'text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]'
-                : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]'
-            }`}
-          >
-            Statistics
-          </button>
-        </div>
-
-        {/* Dashboard View */}
-        {activeView === 'dashboard' && (
-          <>
-            {/* Members Section - Subtle, not loud */}
-            <div className="px-6 py-4 border-b border-[var(--color-border-subtle)]">
-              <div className="flex items-center gap-3">
-            <div className="flex -space-x-2">
-              {group.members.slice(0, 4).map((member, index) => (
-                <div
-                  key={member.id}
-                  className="w-8 h-8 rounded-full bg-[var(--color-accent-subtle)] border-2 border-[var(--color-bg)] flex items-center justify-center text-xs font-medium text-[var(--color-text-secondary)]"
-                  style={{ zIndex: 4 - index }}
-                >
-                  {(member.name || member.phone).slice(0, 1).toUpperCase()}
-                </div>
-              ))}
-              {group.members.length > 4 && (
-                <div 
-                  className="w-8 h-8 rounded-full bg-[var(--color-border)] border-2 border-[var(--color-bg)] flex items-center justify-center text-xs font-medium text-[var(--color-text-muted)]"
-                  style={{ zIndex: 0 }}
-                >
-                  +{group.members.length - 4}
-                </div>
-              )}
-            </div>
-            <span className="text-sm text-[var(--color-text-muted)]">
-              {group.members.length} {group.members.length === 1 ? 'person' : 'people'}
-            </span>
-          </div>
-        </div>
-
-        {/* Balance Summary - Clear and prominent */}
+      <div className="flex-1 flex flex-col max-w-lg mx-auto w-full pb-24">
         {hasExpenses && (
-          <div className="px-6 py-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider mb-1">
-                  Your Balance
-                </p>
-                <p className={`text-2xl font-semibold rupee ${
+          <div className="px-6 pt-6">
+            <HeroCard
+              balance={totalSpent}
+              type="group"
+              members={group.members}
+              splitCount={group.members.length}
+              expenseCount={expenses.length}
+            />
+            
+            {/* Balance Preview */}
+            {currentUserBalance !== 0 && (
+              <div className="mt-4 p-4 bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)]">
+                <p className="text-xs text-[var(--color-text-muted)] mb-1">Your Balance</p>
+                <p className={`text-2xl font-bold ${
                   currentUserBalance > 0 
                     ? 'text-[var(--color-success)]' 
-                    : currentUserBalance < 0
-                    ? 'text-[var(--color-error)]'
-                    : 'text-[var(--color-text-secondary)]'
+                    : 'text-[var(--color-error)]'
                 }`}>
-                  {currentUserBalance > 0 ? '+' : ''}{formatAmount(Math.abs(currentUserBalance))}
+                  {currentUserBalance > 0 ? '+' : ''}
+                  {formatAmount(Math.abs(currentUserBalance))}
                 </p>
-                <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
-                  {currentUserBalance > 0 
-                    ? 'You get back' 
-                    : currentUserBalance < 0
-                    ? 'You owe'
-                    : 'All settled up'}
+                <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+                  {currentUserBalance > 0 ? 'You get back' : 'You owe'}
                 </p>
+                {currentUserBalance < 0 && balances && balances.length > 0 && (
+                  <button
+                    onClick={() => setShowSettlementPicker(true)}
+                    className="mt-3 w-full py-2 bg-[var(--color-accent)] text-[#0a0a0b] rounded-xl text-sm font-semibold hover:bg-[var(--color-accent-hover)] transition-colors"
+                  >
+                    Record Settlement
+                  </button>
+                )}
               </div>
-              <button
-                onClick={() => setShowSettlementPicker(true)}
-                className="py-2.5 px-5 bg-[var(--color-accent)] text-white rounded-xl text-sm font-medium hover:bg-[var(--color-accent-hover)] transition-all duration-200 shadow-[var(--shadow-sm)]"
-              >
-                Record Settlement
-              </button>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Content Area */}
         {!hasExpenses ? (
-          /* Empty State - Calm and intentional */
           <div className="flex-1 flex flex-col items-center justify-center px-8 py-12">
             <div className="animate-fade-in text-center">
-              <div className="w-16 h-16 mx-auto mb-5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl flex items-center justify-center shadow-[var(--shadow-sm)]">
+              <div className="w-20 h-20 mx-auto mb-6 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-3xl flex items-center justify-center shadow-[var(--shadow-sm)]">
                 <svg 
-                  className="w-7 h-7 text-[var(--color-text-muted)]"
+                  className="w-10 h-10 text-[var(--color-accent)]"
                   fill="none" 
                   viewBox="0 0 24 24" 
                   stroke="currentColor"
@@ -373,112 +310,107 @@ export default function GroupDetail() {
                   />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">
+              <h3 className="text-2xl font-bold text-[var(--color-text-primary)] mb-3">
                 No expenses yet
               </h3>
-              <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed max-w-[240px] mx-auto">
+              <p className="text-[var(--color-text-secondary)] leading-relaxed max-w-[260px] mx-auto">
                 Add the first one when you spend together
               </p>
             </div>
           </div>
         ) : (
-          /* Activity Feed (Expenses + Settlements) */
-          <div className="flex-1 overflow-auto px-6 py-4">
+          <div className="flex-1 overflow-auto px-6 pt-6 pb-8">
+            <h2 className="text-sm font-bold text-[var(--color-text-primary)] mb-4">
+              Activity
+            </h2>
             <div className="space-y-3">
               {activityFeed.map((item, index) => (
                 <div
                   key={`${item.type}-${item.id}`}
-                  className={`
-                    card p-4 animate-fade-in
-                    ${index === 0 && location.state?.expenseAdded ? 'ring-2 ring-[var(--color-success)]/20' : ''}
-                  `}
-                  style={{ animationDelay: `${index * 50}ms` }}
+                  className="bg-[var(--color-surface)] rounded-2xl p-4 border border-[var(--color-border)] shadow-[var(--shadow-card)] animate-fade-in"
+                  style={{ animationDelay: `${index * 30}ms` }}
                 >
                   {item.type === 'expense' ? (
-                    /* Expense Item */
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        {/* Amount - Primary */}
-                        <p className="text-xl font-semibold text-[var(--color-text-primary)] rupee">
-                          {formatAmount(item.amount)}
+                    <div>
+                      {/* Description as primary */}
+                      {item.description && (
+                        <p className="text-base font-semibold text-[var(--color-text-primary)] mb-2">
+                          {item.description}
                         </p>
-                        {/* Paid by - Secondary */}
-                        <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
-                          Paid by {getPayerName(item)}
-                        </p>
-                        {/* Split info - Subtle */}
-                        {item.splits && item.splits.length > 0 && (
-                          <p className="text-xs text-[var(--color-text-muted)] mt-1.5">
-                            Split {item.splits.length} {item.splits.length === 1 ? 'way' : 'ways'}
+                      )}
+                      {/* Amount */}
+                      <p className="text-2xl font-bold text-[var(--color-text-primary)] rupee mb-1">
+                        {formatAmount(item.amount)}
+                      </p>
+                      {/* Meta */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-[var(--color-text-secondary)]">
+                            Paid by {getPayerName(item)}
                           </p>
-                        )}
-                        {/* Description - If present */}
-                        {item.description && (
-                          <p className="text-sm text-[var(--color-text-muted)] mt-2 truncate">
-                            {item.description}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        {/* Timestamp - Very subtle */}
-                        <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap">
-                          {formatTime(item.createdAt)}
-                        </span>
-                        {/* Edit button - anyone can edit */}
-                        <button
-                          onClick={() => setEditingExpense(item)}
-                          className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-surface)] rounded-lg transition-all"
-                          title="Edit expense"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
+                          {item.splits && item.splits.length > 0 && (
+                            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                              Split {item.splits.length} {item.splits.length === 1 ? 'way' : 'ways'}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs text-[var(--color-text-muted)]">
+                            {formatTime(item.createdAt)}
+                          </span>
+                          <button
+                            onClick={() => setEditingExpense(item)}
+                            className="block ml-auto mt-1 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ) : (
-                    /* Settlement Item */
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        {/* Settlement badge */}
-                        <div className="flex items-center gap-2 mb-2">
-                          <svg className="w-4 h-4 text-[var(--color-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <div>
+                      {/* Settlement badge */}
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 h-6 rounded-full bg-[var(--color-success)]/20 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-[var(--color-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
-                          <span className="text-xs font-medium text-[var(--color-success)] uppercase tracking-wider">
-                            Settlement
-                          </span>
                         </div>
-                        {/* Amount */}
-                        <p className="text-xl font-semibold text-[var(--color-text-primary)] rupee">
-                          {formatAmount(item.amount)}
-                        </p>
-                        {/* Settlement details */}
-                        <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
-                          {getSettlementText(item)}
-                        </p>
-                        {/* Method */}
-                        {item.method && (
-                          <p className="text-xs text-[var(--color-text-muted)] mt-1.5 capitalize">
-                            {item.method}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        {/* Timestamp */}
-                        <span className="text-xs text-[var(--color-text-muted)] whitespace-nowrap">
-                          {formatTime(item.createdAt)}
+                        <span className="text-xs font-bold text-[var(--color-success)] uppercase tracking-wider">
+                          Settlement
                         </span>
-                        {/* Edit button - anyone can edit */}
-                        <button
-                          onClick={() => setEditingSettlement(item)}
-                          className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:bg-[var(--color-surface)] rounded-lg transition-all"
-                          title="Edit settlement"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
+                      </div>
+                      {/* Amount */}
+                      <p className="text-2xl font-bold text-[var(--color-text-primary)] rupee mb-1">
+                        {formatAmount(item.amount)}
+                      </p>
+                      {/* Meta */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-[var(--color-text-secondary)]">
+                            {getSettlementText(item)}
+                          </p>
+                          {item.method && (
+                            <p className="text-xs text-[var(--color-text-muted)] mt-0.5 capitalize">
+                              {item.method}
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs text-[var(--color-text-muted)]">
+                            {formatTime(item.createdAt)}
+                          </span>
+                          <button
+                            onClick={() => setEditingSettlement(item)}
+                            className="block ml-auto mt-1 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -487,61 +419,21 @@ export default function GroupDetail() {
             </div>
           </div>
         )}
+      </div>
 
-        {/* Add Expense CTA - Fixed at bottom */}
-        <div className="sticky bottom-0 bg-[var(--color-bg)] border-t border-[var(--color-border-subtle)] safe-area-bottom">
-          <div className="px-6 py-4">
-            <button
-              onClick={() => navigate(`/group/${groupId}/add-expense`)}
-              className="w-full py-4 px-6 bg-[var(--color-accent)] text-white rounded-2xl font-semibold text-base hover:bg-[var(--color-accent-hover)] active:scale-[0.98] transition-all duration-200 shadow-[var(--shadow-md)]"
-            >
-              Add Expense
-            </button>
-          </div>
+      {/* Sticky CTA */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-[var(--color-bg)] via-[var(--color-bg)] to-transparent pb-safe">
+        <div className="max-w-lg mx-auto px-6 pt-4 pb-6">
+          <button
+            onClick={() => navigate(`/group/${groupId}/add-expense`)}
+            className="w-full py-4 bg-[var(--color-accent)] text-[#0a0a0b] rounded-2xl font-bold text-lg hover:bg-[var(--color-accent-hover)] active:scale-[0.98] transition-all duration-200 shadow-[var(--shadow-hero)] flex items-center justify-center gap-2"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add Expense
+          </button>
         </div>
-          </>
-        )}
-
-        {/* Statistics View */}
-        {activeView === 'statistics' && (
-          <div className="flex-1 overflow-auto">
-            {hasExpenses ? (
-              <Statistics 
-                expenses={expenses}
-                settlements={settlements}
-                balances={balances}
-                group={group}
-                currentUser={user}
-              />
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center px-8 py-12">
-                <div className="animate-fade-in text-center">
-                  <div className="w-16 h-16 mx-auto mb-5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-2xl flex items-center justify-center shadow-[var(--shadow-sm)]">
-                    <svg 
-                      className="w-7 h-7 text-[var(--color-text-muted)]"
-                      fill="none" 
-                      viewBox="0 0 24 24" 
-                      stroke="currentColor"
-                      strokeWidth={1.5}
-                    >
-                      <path 
-                        strokeLinecap="round" 
-                        strokeLinejoin="round" 
-                        d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" 
-                      />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">
-                    No statistics yet
-                  </h3>
-                  <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed max-w-[240px] mx-auto">
-                    Add expenses to see group statistics
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       <Toast 
@@ -551,90 +443,70 @@ export default function GroupDetail() {
       />
 
       {/* Settlement Picker Modal */}
-      {showSettlementPicker && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 animate-fade-in" onClick={() => setShowSettlementPicker(false)}>
+      {showSettlementPicker && balances && balances.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/60 animate-fade-in" onClick={() => setShowSettlementPicker(false)}>
           <div 
-            className="w-full max-w-lg bg-[var(--color-bg)] rounded-t-3xl p-6 animate-slide-up safe-area-bottom max-h-[80vh] overflow-auto"
+            className="w-full max-w-lg mx-auto bg-[var(--color-surface)] rounded-t-3xl p-6 animate-slide-up safe-area-bottom max-h-[80vh] overflow-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
-                  Record Settlement
-                </h2>
-                <button
-                  onClick={() => setShowSettlementPicker(false)}
-                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--color-border)] transition-colors"
-                >
-                  <svg className="w-5 h-5 text-[var(--color-text-secondary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <p className="text-sm text-[var(--color-text-secondary)]">
-                Select who paid whom
-              </p>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
+                Record Settlement
+              </h2>
+              <button
+                onClick={() => setShowSettlementPicker(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-[var(--color-border)] transition-colors"
+              >
+                <svg className="w-5 h-5 text-[var(--color-text-secondary)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
+            <p className="text-sm text-[var(--color-text-secondary)] mb-4">
+              Select who paid whom
+            </p>
 
-            {/* Balances List */}
-            {balances && balances.length > 0 ? (
-              <div className="space-y-3">
-                {balances.map((balance, index) => {
-                  const userName = balance.userName || balance.userPhone?.slice(-4) || 'Unknown';
-                  const owes = balance.owes || [];
+            <div className="space-y-3">
+              {balances.map((balance, index) => {
+                const userName = balance.userName || balance.userPhone?.slice(-4) || 'Unknown';
+                const owes = balance.owes || [];
+                
+                return owes.map((debt, debtIndex) => {
+                  const creditorName = debt.userName || debt.userPhone?.slice(-4) || 'Unknown';
                   
-                  return owes.map((debt, debtIndex) => {
-                    const creditorName = debt.userName || debt.userPhone?.slice(-4) || 'Unknown';
-                    
-                    return (
-                      <button
-                        key={`${balance.userId}-${debt.userId}-${debtIndex}`}
-                        onClick={() => {
-                          setSelectedSettlement({
-                            fromUser: { id: balance.userId, name: userName, phone: balance.userPhone },
-                            toUser: { id: debt.userId, name: creditorName, phone: debt.userPhone },
-                            amount: debt.amount
-                          });
-                          setShowSettlementPicker(false);
-                          setShowSettleUp(true);
-                        }}
-                        className="w-full card p-4 text-left hover:bg-[var(--color-accent-subtle)] transition-colors animate-fade-in"
-                        style={{ animationDelay: `${(index * owes.length + debtIndex) * 50}ms` }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-base font-medium text-[var(--color-text-primary)]">
-                              {userName} → {creditorName}
-                            </p>
-                            <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                              {userName === 'You' || balance.userId === user?.id ? 'You owe' : `${userName} owes`} {creditorName === 'You' || debt.userId === user?.id ? 'you' : creditorName}
-                            </p>
-                          </div>
-                          <p className="text-lg font-semibold text-[var(--color-error)] rupee">
-                            {formatAmount(debt.amount)}
+                  return (
+                    <button
+                      key={`${balance.userId}-${debt.userId}-${debtIndex}`}
+                      onClick={() => {
+                        setSelectedSettlement({
+                          fromUser: { id: balance.userId, name: userName, phone: balance.userPhone },
+                          toUser: { id: debt.userId, name: creditorName, phone: debt.userPhone },
+                          amount: debt.amount
+                        });
+                        setShowSettlementPicker(false);
+                        setShowSettleUp(true);
+                      }}
+                      className="w-full bg-[var(--color-surface-elevated)] border border-[var(--color-border)] rounded-2xl p-4 text-left hover:bg-[var(--color-border)] transition-colors animate-fade-in"
+                      style={{ animationDelay: `${(index * owes.length + debtIndex) * 50}ms` }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-base font-medium text-[var(--color-text-primary)]">
+                            {userName} → {creditorName}
+                          </p>
+                          <p className="text-sm text-[var(--color-text-muted)] mt-1">
+                            {userName === 'You' || balance.userId === user?.id ? 'You owe' : `${userName} owes`} {creditorName === 'You' || debt.userId === user?.id ? 'you' : creditorName}
                           </p>
                         </div>
-                      </button>
-                    );
-                  });
-                })}
-              </div>
-            ) : (
-              <div className="text-center py-8">
-                <div className="w-16 h-16 mx-auto mb-4 bg-[var(--color-success)]/10 rounded-full flex items-center justify-center">
-                  <svg className="w-8 h-8 text-[var(--color-success)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-[var(--color-text-primary)] mb-2">
-                  All settled up!
-                </h3>
-                <p className="text-[var(--color-text-secondary)]">
-                  No outstanding balances in this group
-                </p>
-              </div>
-            )}
+                        <p className="text-lg font-semibold text-[var(--color-error)] rupee">
+                          {formatAmount(debt.amount)}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                });
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -654,7 +526,7 @@ export default function GroupDetail() {
             setSelectedSettlement(null);
             setToastMessage('Payment recorded');
             setShowToast(true);
-            loadData(); // Reload to update balances
+            loadData();
           }}
         />
       )}
