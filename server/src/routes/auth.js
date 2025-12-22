@@ -4,6 +4,7 @@ import { saveOtp, getOtp, deleteOtp, isOtpExpired } from '../store/otpStore.js';
 import { findOrCreateUser, findUserByPhone } from '../store/userStore.js';
 import { createSession, getSession, deleteSession } from '../store/sessionStore.js';
 import { sendOtpSms } from '../services/sms.js';
+import { logAuth } from '../utils/devLogger.js';
 
 const router = Router();
 
@@ -47,6 +48,9 @@ router.post('/send-otp', async (req, res) => {
     
     // Send OTP via SMS
     await sendOtpSms(phone, otp);
+    
+    // Log OTP event
+    logAuth('OTP_SENT', { phone, otp, expiry: '5 minutes' });
     
     res.json({
       success: true,
@@ -102,6 +106,8 @@ router.post('/verify-otp', async (req, res) => {
     // Verify OTP
     const isValid = await bcrypt.compare(otp, otpRecord.otpHash);
     if (!isValid) {
+      // Log failed auth attempt
+      logAuth('AUTH_FAILED', { reason: 'Invalid OTP', phone });
       return res.status(400).json({
         success: false,
         error: 'Incorrect code. Try again.'
@@ -126,6 +132,10 @@ router.post('/verify-otp', async (req, res) => {
     
     // Create session
     const session = createSession(user.id);
+    
+    // Log successful authentication
+    logAuth('OTP_VERIFIED', { phone, userId: user.id, token: session.token });
+    logAuth('SESSION_CREATED', { userId: user.id, sessionId: session.token.substring(0, 10), token: session.token });
     
     res.json({
       success: true,

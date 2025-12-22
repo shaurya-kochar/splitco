@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
-:root {
+:root, [data-theme="dark"] {
   /* SplitCo Dark Theme Colors */
   --color-bg: #0a0a0b;
   --color-surface: #121214;
@@ -24,6 +24,31 @@
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
   --shadow-hero: 0 8px 32px rgba(245, 197, 24, 0.3);
+}
+
+[data-theme="light"] {
+  /* SplitCo Light Theme Colors */
+  --color-bg: #ffffff;
+  --color-surface: #f8f9fa;
+  --color-surface-elevated: #e9ecef;
+  --color-text-primary: #1a1a1c;
+  --color-text-secondary: #52525b;
+  --color-text-muted: #71717a;
+  --color-text-subtle: #a1a1aa;
+  --color-accent: #f5c518;
+  --color-accent-hover: #e6b608;
+  --color-accent-subtle: rgba(245, 197, 24, 0.15);
+  --color-border: #e5e7eb;
+  --color-border-subtle: #f3f4f6;
+  --color-error: #dc2626;
+  --color-success: #16a34a;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
+  --shadow-hero: 0 4px 20px rgba(245, 197, 24, 0.25);
 }
 
 html {

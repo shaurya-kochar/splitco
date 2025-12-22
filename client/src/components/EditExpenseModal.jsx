@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 export default function EditExpenseModal({ expense, group, onClose, onSave, onDelete }) {
+  const navigate = useNavigate();
   const [amount, setAmount] = useState(expense.amount);
   const [description, setDescription] = useState(expense.description || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showRecurringOptions, setShowRecurringOptions] = useState(false);
   
   // Parse existing paidByData to get initial payers
   const getInitialPayers = () => {
@@ -138,7 +141,7 @@ export default function EditExpenseModal({ expense, group, onClose, onSave, onDe
       await onSave({
         amount: Number(amount),
         description,
-        paidByData: paidByData ? JSON.stringify(paidByData) : undefined,
+        paidByData: paidByData, // Send as object, backend will handle it
         paidBy: payers[0].userId, // Use first payer as primary
         splits: splitters.map(s => ({
           userId: s.userId,
@@ -169,6 +172,31 @@ export default function EditExpenseModal({ expense, group, onClose, onSave, onDe
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDuplicate = () => {
+    // Navigate to add expense page with pre-filled data
+    const params = new URLSearchParams({
+      amount: amount,
+      description: description,
+      payers: JSON.stringify(payers),
+      splitters: JSON.stringify(splitters)
+    });
+    navigate(`/group/${group.id}/add-expense?${params.toString()}`);
+    onClose();
+  };
+
+  const handleRecurring = (frequency) => {
+    // Navigate to add expense page with recurring flag
+    const params = new URLSearchParams({
+      amount: amount,
+      description: description,
+      payers: JSON.stringify(payers),
+      splitters: JSON.stringify(splitters),
+      recurring: frequency
+    });
+    navigate(`/group/${group.id}/add-expense?${params.toString()}`);
+    onClose();
   };
 
   const getMemberName = (memberId) => {
@@ -353,6 +381,63 @@ export default function EditExpenseModal({ expense, group, onClose, onSave, onDe
           >
             {loading ? 'Saving...' : 'Save Changes'}
           </button>
+
+          {/* Duplicate and Recurring Options */}
+          <div className="flex gap-2">
+            <button
+              onClick={handleDuplicate}
+              disabled={loading}
+              className="flex-1 py-3 px-6 bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-primary)] rounded-xl font-medium hover:bg-[var(--color-surface-elevated)] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              Duplicate
+            </button>
+            <button
+              onClick={() => setShowRecurringOptions(!showRecurringOptions)}
+              disabled={loading}
+              className="flex-1 py-3 px-6 bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-primary)] rounded-xl font-medium hover:bg-[var(--color-surface-elevated)] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              Repeat
+            </button>
+          </div>
+
+          {/* Recurring Options */}
+          {showRecurringOptions && (
+            <div className="space-y-2 p-4 bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)]">
+              <p className="text-sm font-medium text-[var(--color-text-secondary)] mb-3">
+                Repeat this expense:
+              </p>
+              <button
+                onClick={() => handleRecurring('daily')}
+                className="w-full py-2 px-4 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] rounded-lg transition-colors"
+              >
+                Every day
+              </button>
+              <button
+                onClick={() => handleRecurring('weekly')}
+                className="w-full py-2 px-4 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] rounded-lg transition-colors"
+              >
+                Every week
+              </button>
+              <button
+                onClick={() => handleRecurring('monthly')}
+                className="w-full py-2 px-4 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] rounded-lg transition-colors"
+              >
+                Every month
+              </button>
+              <button
+                onClick={() => handleRecurring('yearly')}
+                className="w-full py-2 px-4 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] rounded-lg transition-colors"
+              >
+                Every year
+              </button>
+              <button
+                onClick={() => handleRecurring('custom')}
+                className="w-full py-2 px-4 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] rounded-lg transition-colors"
+              >
+                Custom interval...
+              </button>
+            </div>
+          )}
           
           <button
             onClick={handleDelete}

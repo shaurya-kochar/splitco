@@ -158,7 +158,7 @@ export default function SettleUpModal({ groupId, fromUser, toUser, defaultAmount
         </div>
 
         {/* Info */}
-        <div className="bg-[var(--color-accent-subtle)] border border-[var(--color-border)] rounded-xl p-4">
+        {/* <div className="bg-[var(--color-accent-subtle)] border border-[var(--color-border)] rounded-xl p-4">
           <div className="flex gap-3">
             <svg className="w-5 h-5 text-[var(--color-text-secondary)] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -167,7 +167,7 @@ export default function SettleUpModal({ groupId, fromUser, toUser, defaultAmount
               You can edit the amount if settling a partial payment or combining cash + UPI
             </div>
           </div>
-        </div>
+        </div> */}
       </div>
     </div>
   );

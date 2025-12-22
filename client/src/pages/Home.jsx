@@ -12,6 +12,7 @@ export default function Home() {
   const [totalExpenses, setTotalExpenses] = useState(0);
   const [totalSplits, setTotalSplits] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [recentSplitsFilter, setRecentSplitsFilter] = useState('all');
   const navigate = useNavigate();
   const { logout, user } = useAuth();
 
@@ -62,7 +63,7 @@ export default function Home() {
       style: 'currency',
       currency: 'INR',
       minimumFractionDigits: 0,
-      maximumFractionDigits: 0
+      maximumFractionDigits: 2
     }).format(Math.abs(amount));
   };
 
@@ -109,7 +110,7 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="px-6 pt-2 pb-1">
+      <div className="px-6 pt-2 pb-1 text-center">
         <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-1">
           Hello, {user?.name?.split(' ')[0] || 'User'}👋
         </h1>
@@ -128,6 +129,165 @@ export default function Home() {
               splitCount={totalSplits}
               expenseCount={totalExpenses}
             />
+            
+            {/* Balance Breakdown on Home */}
+            {netBalance !== 0 && (
+              <div className="mt-6">
+                <h3 className="text-sm font-bold text-[var(--color-text-primary)] mb-3">
+                  Balance Details
+                </h3>
+                <div className="space-y-2">
+                  {groups.map((group) => {
+                    if (!group.currentUserBalance || group.currentUserBalance === 0) return null;
+                    
+                    const isPositive = group.currentUserBalance > 0;
+                    const groupName = group.type === 'direct' ? group.displayName : group.name;
+                    
+                    // Get the actual person who owes or is owed
+                    const personName = isPositive 
+                      ? (group.owedBy?.name || groupName)
+                      : (group.owesTo?.name || groupName);
+                    
+                    return (
+                      <div
+                        key={group.id}
+                        className="bg-[var(--color-surface)] rounded-xl p-3 border border-[var(--color-border)]"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-[var(--color-text-primary)]">
+                              {isPositive ? `${personName} owes you` : `You owe ${personName}`}
+                            </p>
+                            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                              in {groupName}
+                            </p>
+                          </div>
+                          <p className={`text-base font-semibold rupee ${
+                            isPositive 
+                              ? 'text-[var(--color-success)]' 
+                              : 'text-[var(--color-error)]'
+                          }`}>
+                            {formatAmount(group.currentUserBalance)}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Recent Splits Section */}
+            {hasContent && (
+              <div className="mt-6">
+                <h3 className="text-sm font-bold text-[var(--color-text-primary)] mb-3">
+                  Recent Splits
+                </h3>
+                <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] overflow-hidden">
+                  <div className="flex items-center gap-3 p-3 border-b border-[var(--color-border-subtle)]">
+                    <div className="flex gap-1">
+                      <button 
+                        onClick={() => setRecentSplitsFilter('all')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                          recentSplitsFilter === 'all' 
+                            ? 'bg-[var(--color-accent)] text-[#0a0a0b]' 
+                            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)]'
+                        }`}
+                      >
+                        All
+                      </button>
+                      <button 
+                        onClick={() => setRecentSplitsFilter('paid')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                          recentSplitsFilter === 'paid' 
+                            ? 'bg-[var(--color-accent)] text-[#0a0a0b]' 
+                            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)]'
+                        }`}
+                      >
+                        Paid
+                      </button>
+                      <button 
+                        onClick={() => setRecentSplitsFilter('pending')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                          recentSplitsFilter === 'pending' 
+                            ? 'bg-[var(--color-accent)] text-[#0a0a0b]' 
+                            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)]'
+                        }`}
+                      >
+                        Pending
+                      </button>
+                      {/* <button 
+                        onClick={() => setRecentSplitsFilter('overdue')}
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-full transition-colors ${
+                          recentSplitsFilter === 'overdue' 
+                            ? 'bg-[var(--color-accent)] text-[#0a0a0b]' 
+                            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)]'
+                        }`}
+                      >
+                        Overdue
+                      </button> */}
+                    </div>
+                  </div>
+                  <div className="divide-y divide-[var(--color-border-subtle)]">
+                    {(() => {
+                      // Get all recent expenses with their actual paid status from backend
+                      const allExpenses = groups.flatMap(g => 
+                        (g.recentExpenses || []).map(exp => ({ 
+                          ...exp, 
+                          groupName: g.name, 
+                          groupId: g.id,
+                          // isPaid now comes from the backend
+                        }))
+                      );
+                      
+                      // Filter based on selected filter
+                      const filteredExpenses = recentSplitsFilter === 'all' 
+                        ? allExpenses
+                        : recentSplitsFilter === 'paid'
+                        ? allExpenses.filter(exp => exp.isPaid)
+                        : allExpenses.filter(exp => !exp.isPaid);
+                      
+                      const displayExpenses = filteredExpenses.slice(0, 5);
+                      
+                      return displayExpenses.length > 0 ? displayExpenses.map((expense, idx) => (
+                        <div key={idx} className="p-3 hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer" onClick={() => navigate(`/group/${expense.groupId}`)}>
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold text-[var(--color-text-primary)]">
+                                {expense.description || 'Expense'}
+                              </p>
+                              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                                {expense.groupName}
+                              </p>
+                            </div>
+                            <div className="text-right ml-3">
+                              <p className="text-base font-bold text-[var(--color-text-primary)]">
+                                ₹{expense.amount.toFixed(0)}
+                              </p>
+                              <span className={`inline-block px-2 py-0.5 text-[10px] font-semibold rounded-full ${
+                                expense.isPaid 
+                                  ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' 
+                                  : 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]'
+                              }`}>
+                                {expense.isPaid ? 'Paid' : 'Pending'}
+                              </span>
+                            </div>
+                          </div>
+                          {/* <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
+                            <span>You owe ₹{(expense.amount / 2).toFixed(0)}</span>
+                            <span>{new Date(expense.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                          </div> */}
+                        </div>
+                      )) : (
+                        <div className="p-6 text-center text-sm text-[var(--color-text-muted)]">
+                          No {recentSplitsFilter !== 'all' ? recentSplitsFilter : ''} expenses
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -202,9 +362,11 @@ export default function Home() {
                               </div>
                             )}
                           </div>
-                          <span className="text-xs text-[var(--color-accent)] font-semibold">
-                            75% Paid
-                          </span>
+                          {group.totalExpenses > 0 && (
+                            <span className="text-xs text-[var(--color-accent)] font-semibold">
+                              {group.expenseCount} {group.expenseCount === 1 ? 'expense' : 'expenses'}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="text-right">

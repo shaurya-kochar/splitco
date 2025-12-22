@@ -4,3 +4,8 @@
 
 # #all the test scripts
 # *.sh
+
+# Logging and testing
+logs/
+*.log
+test-transitivity.js

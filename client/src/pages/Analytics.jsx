@@ -117,10 +117,44 @@ export default function Analytics() {
             <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">
               Spending Insights
             </h2>
-            <div className="h-40 flex items-center justify-center">
-              <p className="text-[var(--color-text-muted)] text-sm">
-                Charts coming soon
-              </p>
+            
+            {/* Simple Bar Chart */}
+            <div className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-[var(--color-text-secondary)]">You Get Back</span>
+                  <span className="text-sm font-semibold text-[var(--color-success)]">{formatAmount(stats.totalOwed)}</span>
+                </div>
+                <div className="h-3 bg-[var(--color-surface-elevated)] rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-green-400 to-green-500 rounded-full transition-all duration-500"
+                    style={{ width: `${stats.totalOwed > 0 ? Math.min((stats.totalOwed / (stats.totalOwed + stats.totalOwe)) * 100, 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-[var(--color-text-secondary)]">You Owe</span>
+                  <span className="text-sm font-semibold text-[var(--color-error)]">{formatAmount(stats.totalOwe)}</span>
+                </div>
+                <div className="h-3 bg-[var(--color-surface-elevated)] rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-red-400 to-red-500 rounded-full transition-all duration-500"
+                    style={{ width: `${stats.totalOwe > 0 ? Math.min((stats.totalOwe / (stats.totalOwed + stats.totalOwe)) * 100, 100) : 0}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-[var(--color-border)]">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[var(--color-text-secondary)]">Net Balance</span>
+                  <span className={`text-base font-bold ${stats.totalOwed - stats.totalOwe >= 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-error)]'}`}>
+                    {stats.totalOwed - stats.totalOwe >= 0 ? '+' : ''}
+                    {formatAmount(stats.totalOwed - stats.totalOwe)}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -7,6 +7,7 @@ import { createExpense, getExpensesByGroup, getExpenseById, deleteExpense, updat
 import { createExpenseSplits, getSplitsByExpenses, validateSplits, deleteSplitsForExpense } from '../store/expenseSplitStore.js';
 import { calculateGroupBalances, getSettlementPlan } from '../store/balanceCalculator.js';
 import { createSettlement, getGroupSettlements, deleteSettlement, getSettlementById, updateSettlement } from '../store/settlementStore.js';
+import { logExpense, logSettlement, logBalances, logGroupOperation, logAuth, logUserAction, logError } from '../utils/devLogger.js';
 
 const router = Router();
 
@@ -72,6 +73,100 @@ router.get('/', authMiddleware, (req, res) => {
       
       const members = getGroupMembers(groupId);
       
+      // Get expenses for this group
+      const expenseRecords = getExpensesByGroup(groupId);
+      const expenseIds = expenseRecords.map(e => e.id);
+      const splitsMap = getSplitsByExpenses(expenseIds);
+      
+      // Build expenses with splits
+      const expenses = expenseRecords.map(expense => ({
+        ...expense,
+        splits: splitsMap.get(expense.id) || []
+      }));
+      
+      // Get settlements
+      const settlementRecords = getGroupSettlements(groupId);
+      
+      // Calculate balances
+      const balances = calculateGroupBalances(expenses, settlementRecords);
+      const currentUserBalance = balances.get(userId) ? Number(balances.get(userId).balance.toFixed(2)) : 0;
+      
+      // Get who owes/owed by current user
+      const currentUserBalanceData = balances.get(userId);
+      let owesTo = null;
+      let owedBy = null;
+      
+      if (currentUserBalanceData) {
+        // If current user owes money (negative balance)
+        if (currentUserBalance < 0) {
+          const owesEntries = Array.from(currentUserBalanceData.owes.entries());
+          if (owesEntries.length > 0) {
+            // Get the person they owe the most to
+            const [creditorId, amount] = owesEntries.sort((a, b) => b[1] - a[1])[0];
+            const creditor = findUserById(creditorId);
+            owesTo = {
+              userId: creditorId,
+              name: creditor?.name || creditor?.phone || 'Unknown',
+              amount: Number(amount.toFixed(2))
+            };
+          }
+        }
+        // If current user is owed money (positive balance)
+        else if (currentUserBalance > 0) {
+          const owedByEntries = Array.from(currentUserBalanceData.owedBy.entries());
+          if (owedByEntries.length > 0) {
+            // Get the person who owes them the most
+            const [debtorId, amount] = owedByEntries.sort((a, b) => b[1] - a[1])[0];
+            const debtor = findUserById(debtorId);
+            owedBy = {
+              userId: debtorId,
+              name: debtor?.name || debtor?.phone || 'Unknown',
+              amount: Number(amount.toFixed(2))
+            };
+          }
+        }
+      }
+      
+      // Calculate total expenses
+      const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      
+      // Get recent expenses (last 5)
+      const recentExpenses = expenses
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, 5)
+        .map(exp => {
+          const payer = findUserById(exp.paidBy);
+          
+          // Determine if the current user has paid their share
+          // An expense is considered "paid" by the user if:
+          // 1. They are the payer, OR
+          // 2. Their balance for this specific expense is settled (they've paid back their share)
+          // For simplicity, we'll check if the user is involved in the expense and has positive/zero balance
+          const userSplit = exp.splits?.find(s => s.userId === userId);
+          const userIsPayer = exp.paidBy === userId;
+          
+          // If user is the payer, it's "paid" (they paid upfront)
+          // If user has a split and the group balance shows they don't owe money for this specific expense,
+          // we'll consider it paid. For now, we'll use a simplified logic:
+          // - If user is payer: paid
+          // - If user owes money (negative balance) in the group: pending
+          // - If user has positive balance or zero: paid
+          const isPaid = userIsPayer || currentUserBalance >= 0;
+          
+          return {
+            id: exp.id,
+            description: exp.description,
+            amount: exp.amount,
+            createdAt: exp.createdAt,
+            isPaid: isPaid,
+            paidBy: {
+              id: exp.paidBy,
+              name: payer?.name || '',
+              phone: payer?.phone || ''
+            }
+          };
+        });
+      
       // For direct groups, get the other person's info
       let displayName = group.name;
       let otherUser = null;
@@ -84,6 +179,17 @@ router.get('/', authMiddleware, (req, res) => {
         }
       }
       
+      // Get member details
+      const memberDetails = members.map(m => {
+        const user = findUserById(m.userId);
+        return {
+          id: m.userId,
+          phone: user?.phone || 'Unknown',
+          name: user?.name || '',
+          joinedAt: m.joinedAt
+        };
+      });
+      
       return {
         id: group.id,
         name: group.name,
@@ -91,6 +197,13 @@ router.get('/', authMiddleware, (req, res) => {
         type: group.type,
         memberCount: members.length,
         createdAt: group.createdAt,
+        currentUserBalance,
+        owesTo,
+        owedBy,
+        expenseCount: expenses.length,
+        totalExpenses: Number(totalExpenses.toFixed(2)),
+        recentExpenses,
+        members: memberDetails,
         ...(otherUser && { otherUser: { id: otherUser.id, phone: otherUser.phone, name: otherUser.name } })
       };
     }).filter(Boolean);
@@ -424,6 +537,10 @@ router.post('/:groupId/expenses', authMiddleware, (req, res) => {
     // Create splits
     const splitRecords = createExpenseSplits(expense.id, splits);
 
+    // Log expense in dev mode
+    const groupMembers = getGroupMembers(groupId);
+    logExpense(expense, splits, paidByData, groupMembers, userId);
+
     // Get payer details
     const payer = findUserById(paidByUserId);
 
@@ -604,6 +721,9 @@ router.get('/:groupId/balances', authMiddleware, (req, res) => {
       });
     }
 
+    // Log balances in dev mode
+    logBalances(groupId, balanceDetails, userId);
+
     res.json({
       success: true,
       balances: balanceDetails,
@@ -694,6 +814,9 @@ router.post('/:groupId/settlements', authMiddleware, (req, res) => {
     // Get user details
     const fromUser = findUserById(fromUserId);
     const toUser = findUserById(toUserId);
+
+    // Log settlement in dev mode
+    logSettlement(settlement, fromUser, toUser, groupId, currentUserId);
 
     res.json({
       success: true,
@@ -903,7 +1026,10 @@ router.put('/:groupId/expenses/:expenseId', authMiddleware, (req, res) => {
     const updates = {};
     if (amount !== undefined) updates.amount = Number(amount);
     if (description !== undefined) updates.description = description;
-    if (paidByData !== undefined) updates.paidByData = paidByData;
+    if (paidByData !== undefined) {
+      // Parse paidByData if it's a string
+      updates.paidByData = typeof paidByData === 'string' ? JSON.parse(paidByData) : paidByData;
+    }
     if (paidBy !== undefined) updates.paidBy = paidBy;
 
     const updatedExpense = updateExpense(expenseId, updates);
@@ -911,11 +1037,11 @@ router.put('/:groupId/expenses/:expenseId', authMiddleware, (req, res) => {
     // Update splits if provided
     if (splits && Array.isArray(splits)) {
       // Validate splits
-      const validation = validateSplits(splits, updatedExpense.amount);
-      if (!validation.valid) {
+      const isValid = validateSplits(splits, updatedExpense.amount);
+      if (!isValid) {
         return res.status(400).json({
           success: false,
-          error: validation.error
+          error: 'Split amounts must sum to total expense amount'
         });
       }
 

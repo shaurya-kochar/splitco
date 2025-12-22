@@ -3,8 +3,13 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import groupRoutes from './routes/groups.js';
+import { initLogger } from './utils/devLogger.js';
+import { requestLoggerMiddleware } from './middleware/requestLogger.js';
 
 dotenv.config();
+
+// Initialize dev logger if in dev mode
+initLogger();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -15,6 +20,9 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Request logging middleware (should be after body parser)
+app.use(requestLoggerMiddleware);
 
 // Routes
 app.use('/auth', authRoutes);

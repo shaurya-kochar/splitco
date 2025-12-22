@@ -9,7 +9,9 @@ export default function HeroCard({ balance, type = 'balance', members = [], spli
   };
 
   const isPositive = balance >= 0;
-  const balanceText = balance > 0 ? 'You get back' : balance < 0 ? 'You owe' : 'All settled up';
+  const balanceText = type === 'group' 
+    ? 'Total group spending'
+    : balance > 0 ? 'You get back' : balance < 0 ? 'You owe' : 'All settled up';
 
   return (
     <div 
@@ -30,7 +32,7 @@ export default function HeroCard({ balance, type = 'balance', members = [], spli
             {balanceText}
           </p>
         </div>
-        {members.length > 0 && (
+        {/* {members.length > 0 && (
           <div className="flex -space-x-2">
             {members.slice(0, 3).map((member, index) => (
               <div 
@@ -47,7 +49,7 @@ export default function HeroCard({ balance, type = 'balance', members = [], spli
               </div>
             )}
           </div>
-        )}
+        )} */}
       </div>
       
       {/* Visual Element */}
