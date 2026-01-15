@@ -24,6 +24,19 @@ export default function GroupDetail() {
   const location = useLocation();
   const { user } = useAuth();
 
+  // Category mapping with icons
+  const categoryIcons = {
+    food: '🍔',
+    transport: '🚕',
+    utilities: '⚡',
+    entertainment: '🎬',
+    shopping: '🛍️',
+    healthcare: '🏥',
+    travel: '✈️',
+    rent: '🏠',
+    other: '📌'
+  };
+
   const [group, setGroup] = useState(null);
   const [expenses, setExpenses] = useState([]);
   const [settlements, setSettlements] = useState([]);
@@ -172,13 +185,27 @@ export default function GroupDetail() {
   };
 
   const handleDeleteExpense = async (expenseId) => {
+    // Optimistically remove from state immediately
+    const previousExpenses = [...expenses];
+    const previousActivityFeed = [...activityFeed];
+    
+    setExpenses(prev => prev.filter(e => e.id !== expenseId));
+    setActivityFeed(prev => prev.filter(item => !(item.type === 'expense' && item.id === expenseId)));
+    setToastMessage("Expense deleted");
+    setShowToast(true);
+
     try {
+      // Perform API call in background
       await deleteExpense(groupId, expenseId);
-      setToastMessage("Expense deleted");
-      setShowToast(true);
-      await loadData();
+      // Silently re-fetch to ensure sync (balances might change)
+      loadData();
     } catch (err) {
-      throw err;
+      // Rollback on error
+      setExpenses(previousExpenses);
+      setActivityFeed(previousActivityFeed);
+      setToastMessage("Failed to delete expense");
+      setShowToast(true);
+      console.error('Delete expense error:', err);
     }
   };
 
@@ -194,13 +221,27 @@ export default function GroupDetail() {
   };
 
   const handleDeleteSettlement = async (settlementId) => {
+    // Optimistically remove from state immediately
+    const previousSettlements = [...settlements];
+    const previousActivityFeed = [...activityFeed];
+    
+    setSettlements(prev => prev.filter(s => s.id !== settlementId));
+    setActivityFeed(prev => prev.filter(item => !(item.type === 'settlement' && item.id === settlementId)));
+    setToastMessage("Settlement deleted");
+    setShowToast(true);
+
     try {
+      // Perform API call in background
       await deleteSettlement(groupId, settlementId);
-      setToastMessage("Settlement deleted");
-      setShowToast(true);
-      await loadData();
+      // Silently re-fetch to ensure sync (balances might change)
+      loadData();
     } catch (err) {
-      throw err;
+      // Rollback on error
+      setSettlements(previousSettlements);
+      setActivityFeed(previousActivityFeed);
+      setToastMessage("Failed to delete settlement");
+      setShowToast(true);
+      console.error('Delete settlement error:', err);
     }
   };
 
@@ -445,51 +486,61 @@ export default function GroupDetail() {
                     >
                       {item.type === "expense" ? (
                         <div>
-                          {/* Description as primary */}
-                          {item.description && (
-                            <p className="text-base font-semibold text-[var(--color-text-primary)] mb-2">
-                              {item.description}
-                            </p>
-                          )}
-                          {/* Amount */}
-                          <p className="text-2xl font-bold text-[var(--color-text-primary)] rupee mb-1">
-                            {formatAmount(item.amount)}
-                          </p>
-                          {/* Meta */}
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-sm text-[var(--color-text-secondary)]">
-                                Paid by {getPayerName(item)}
-                              </p>
-                              {item.splits && item.splits.length > 0 && (
-                                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                                  Split {item.splits.length}{" "}
-                                  {item.splits.length === 1 ? "way" : "ways"}
+                          <div className="flex items-start gap-3">
+                            {/* Category Icon */}
+                            {item.category && categoryIcons[item.category] && (
+                              <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-[var(--color-bg)] border border-[var(--color-border)] flex items-center justify-center text-xl">
+                                {categoryIcons[item.category]}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              {/* Description as primary */}
+                              {item.description && (
+                                <p className="text-base font-semibold text-[var(--color-text-primary)] mb-2">
+                                  {item.description}
                                 </p>
                               )}
-                            </div>
-                            <div className="text-right">
-                              <span className="text-xs text-[var(--color-text-muted)]">
-                                {formatTime(item.createdAt)}
-                              </span>
-                              <button
-                                onClick={() => setEditingExpense(item)}
-                                className="block ml-auto mt-1 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
-                              >
-                                <svg
-                                  className="w-4 h-4"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                  strokeWidth={2}
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z"
-                                  />
-                                </svg>
-                              </button>
+                              {/* Amount */}
+                              <p className="text-2xl font-bold text-[var(--color-text-primary)] rupee mb-1">
+                                {formatAmount(item.amount)}
+                              </p>
+                              {/* Meta */}
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm text-[var(--color-text-secondary)]">
+                                    Paid by {getPayerName(item)}
+                                  </p>
+                                  {item.splits && item.splits.length > 0 && (
+                                    <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                                      Split {item.splits.length}{" "}
+                                      {item.splits.length === 1 ? "way" : "ways"}
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-xs text-[var(--color-text-muted)]">
+                                    {formatTime(item.createdAt)}
+                                  </span>
+                                  <button
+                                    onClick={() => setEditingExpense(item)}
+                                    className="block ml-auto mt-1 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
+                                  >
+                                    <svg
+                                      className="w-4 h-4"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                      strokeWidth={2}
+                                    >
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z"
+                                      />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>

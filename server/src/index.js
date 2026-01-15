@@ -5,11 +5,15 @@ import authRoutes from './routes/auth.js';
 import groupRoutes from './routes/groups.js';
 import { initLogger } from './utils/devLogger.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
+import { startRecurringExpensesCron } from './utils/recurringExpenses.js';
 
 dotenv.config();
 
 // Initialize dev logger if in dev mode
 initLogger();
+
+// Start recurring expenses scheduler
+startRecurringExpensesCron();
 
 const app = express();
 const PORT = process.env.PORT || 3001;

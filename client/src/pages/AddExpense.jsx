@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { getGroupDetails, createExpense } from "../api/groups";
 import { useAuth } from "../context/AuthContext";
+import { useExpenseCalculator } from "../hooks/useExpenseCalculator";
 
 export default function AddExpense() {
   const { groupId } = useParams();
@@ -13,13 +14,40 @@ export default function AddExpense() {
   const [group, setGroup] = useState(null);
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
+  const [category, setCategory] = useState('other');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [showPaidByPicker, setShowPaidByPicker] = useState(false);
   const [showSplitCustomize, setShowSplitCustomize] = useState(false);
-  const [payers, setPayers] = useState([]); // Array of {id, name, phone, amount}
-  const [splitMembers, setSplitMembers] = useState([]);
+  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  
+  // Use expense calculator hook for all split/payer logic
+  const {
+    payers,
+    splitMembers,
+    toggleMember: handleToggleMember,
+    updateSplitAmount: handleUpdateSplitAmount,
+    distributeSplitsEqually,
+    togglePayer: handleTogglePayer,
+    updatePayerAmount: handleUpdatePayerAmount,
+    distributePaymentsEqually,
+    validateExpense,
+    getExpenseData
+  } = useExpenseCalculator(group, amount, user);
+  
+  // Categories with icons
+  const categories = [
+    { id: 'food', name: 'Food & Dining', icon: '🍔', color: 'bg-orange-500/10 text-orange-600' },
+    { id: 'transport', name: 'Transport', icon: '🚕', color: 'bg-blue-500/10 text-blue-600' },
+    { id: 'utilities', name: 'Utilities', icon: '⚡', color: 'bg-yellow-500/10 text-yellow-600' },
+    { id: 'entertainment', name: 'Entertainment', icon: '🎬', color: 'bg-purple-500/10 text-purple-600' },
+    { id: 'shopping', name: 'Shopping', icon: '🛍️', color: 'bg-pink-500/10 text-pink-600' },
+    { id: 'healthcare', name: 'Healthcare', icon: '🏥', color: 'bg-red-500/10 text-red-600' },
+    { id: 'travel', name: 'Travel', icon: '✈️', color: 'bg-cyan-500/10 text-cyan-600' },
+    { id: 'rent', name: 'Rent & Housing', icon: '🏠', color: 'bg-green-500/10 text-green-600' },
+    { id: 'other', name: 'Other', icon: '📌', color: 'bg-gray-500/10 text-gray-600' }
+  ];
   
   // Recurring expense state
   const [isRecurring, setIsRecurring] = useState(false);
@@ -49,55 +77,11 @@ export default function AddExpense() {
       }
     }
   }, [groupId, location.search]);
-
-  useEffect(() => {
-    if (group && group.members) {
-      // Initialize with current user as sole payer
-      const currentUserMember =
-        group.members.find((m) => m.id === user?.id) || group.members[0];
-      setPayers([{ ...currentUserMember, amount: parseFloat(amount) || 0 }]);
-
-      // Initialize all members in split with equal shares
-      const numAmount = parseFloat(amount) || 0;
-      const equalShare =
-        numAmount > 0
-          ? Number((numAmount / group.members.length).toFixed(2))
-          : 0;
-      setSplitMembers(
-        group.members.map((member) => ({
-          ...member,
-          included: true,
-          share: equalShare,
-        }))
-      );
-    }
-  }, [group, user]);
-
-  useEffect(() => {
-    // Recalculate equal splits when amount changes
-    if (group && amount) {
-      const numAmount = parseFloat(amount);
-      if (numAmount > 0) {
-        // Update payer amounts if single payer
         if (payers.length === 1) {
           setPayers([{ ...payers[0], amount: numAmount }]);
         }
 
         // Update split shares
-        const includedCount = splitMembers.filter((m) => m.included).length;
-        if (includedCount > 0) {
-          const equalShare = Number((numAmount / includedCount).toFixed(2));
-          setSplitMembers((prev) =>
-            prev.map((member) => ({
-              ...member,
-              share: member.included ? equalShare : 0,
-            }))
-          );
-        }
-      }
-    }
-  }, [amount, group]);
-
   const loadGroup = async () => {
     try {
       const response = await getGroupDetails(groupId);
@@ -130,101 +114,15 @@ export default function AddExpense() {
     }
   };
 
-  const handleToggleMember = (memberId) => {
-    setSplitMembers((prev) => {
-      const updated = prev.map((m) =>
-        m.id === memberId ? { ...m, included: !m.included } : m
-      );
-
-      // Recalculate equal split
-      const numAmount = parseFloat(amount);
-      if (numAmount > 0) {
-        const includedCount = updated.filter((m) => m.included).length;
-        if (includedCount > 0) {
-          const equalShare = Number((numAmount / includedCount).toFixed(2));
-          return updated.map((m) => ({
-            ...m,
-            share: m.included ? equalShare : 0,
-          }));
-        }
-      }
-      return updated;
-    });
-  };
-
-  const handleUpdateSplitAmount = (memberId, newAmount) => {
-    setSplitMembers(prev => prev.map(m =>
-      m.id === memberId ? { ...m, share: Number(newAmount) || 0 } : m
-    ));
-  };
-
-  const handleTogglePayer = (memberId) => {
-    setPayers(prev => {
-      const exists = prev.find(p => p.id === memberId);
-      if (exists) {
-        return prev.filter(p => p.id !== memberId);
-      } else {
-        const member = group.members.find(m => m.id === memberId);
-        return [...prev, { ...member, amount: 0 }];
-      }
-    });
-  };
-
-  const handleUpdatePayerAmount = (payerId, newAmount) => {
-    setPayers(prev => prev.map(p =>
-      p.id === payerId ? { ...p, amount: Number(newAmount) || 0 } : p
-    ));
-  };
-
-  const distributePaymentsEqually = () => {
-    const numAmount = parseFloat(amount) || 0;
-    if (numAmount > 0 && payers.length > 0) {
-      const equalAmount = Number((numAmount / payers.length).toFixed(2));
-      setPayers(prev => prev.map(p => ({ ...p, amount: equalAmount })));
-    }
-  };
-
-  const distributeSplitsEqually = () => {
-    const numAmount = parseFloat(amount) || 0;
-    const includedMembers = splitMembers.filter(m => m.included);
-    if (numAmount > 0 && includedMembers.length > 0) {
-      const equalShare = Number((numAmount / includedMembers.length).toFixed(2));
-      setSplitMembers(prev => prev.map(m => ({
-        ...m,
-        share: m.included ? equalShare : 0
-      })));
-    }
-  };
-
   const handleSave = async () => {
+    // Validate using hook
+    const validation = validateExpense();
+    if (!validation.valid) {
+      setError(validation.error);
+      return;
+    }
+
     const numAmount = parseFloat(amount);
-    if (!numAmount || numAmount <= 0) {
-      setError("Enter a valid amount");
-      return;
-    }
-
-    if (payers.length === 0) {
-      setError('Select at least one payer');
-      return;
-    }
-
-    const totalPaid = payers.reduce((sum, p) => sum + p.amount, 0);
-    if (Math.abs(totalPaid - numAmount) > 0.01) {
-      setError(`Total paid (₹${totalPaid.toFixed(2)}) must equal expense amount`);
-      return;
-    }
-
-    const includedMembers = splitMembers.filter((m) => m.included);
-    if (includedMembers.length === 0) {
-      setError("Select at least one person to split with");
-      return;
-    }
-
-    const totalSplit = includedMembers.reduce((sum, m) => sum + m.share, 0);
-    if (Math.abs(totalSplit - numAmount) > 0.01) {
-      setError(`Total split (₹${totalSplit.toFixed(2)}) must equal expense amount`);
-      return;
-    }
     
     // Validate recurring expense settings
     if (isRecurring) {
@@ -238,21 +136,13 @@ export default function AddExpense() {
     setError("");
 
     try {
-      const splits = includedMembers.map((m) => ({
-        userId: m.id,
-        shareAmount: m.share,
-      }));
-
-      const paidByData = payers.length === 1
-        ? { mode: 'single', userId: payers[0].id }
-        : {
-            mode: 'multiple',
-            payments: payers.map(p => ({ userId: p.id, amount: p.amount }))
-          };
+      // Get expense data from hook
+      const { splits, paidByData } = getExpenseData();
 
       const expenseData = {
         amount: numAmount,
         description: description.trim() || null,
+        category: category,
         paidBy: paidByData,
         splits,
       };
@@ -412,6 +302,27 @@ export default function AddExpense() {
                      (payers[0].id === user?.id ? 'You' : (payers[0].name || payers[0].phone)) :
                      `${payers.length} people`}
                 </p>
+              </div>
+              <svg className="w-5 h-5 text-[var(--color-text-subtle)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+              </svg>
+            </div>
+          </button>
+
+          {/* Category Picker */}
+          <button
+            onClick={() => setShowCategoryPicker(true)}
+            className="w-full bg-[var(--color-surface)] rounded-2xl border border-[var(--color-border)] p-4 text-left hover:bg-[var(--color-surface-elevated)] transition-colors"
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{categories.find(c => c.id === category)?.icon}</span>
+                <div>
+                  <p className="text-xs text-[var(--color-text-muted)]">Category</p>
+                  <p className="text-[15px] font-semibold text-[var(--color-text-primary)]">
+                    {categories.find(c => c.id === category)?.name}
+                  </p>
+                </div>
               </div>
               <svg className="w-5 h-5 text-[var(--color-text-subtle)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -878,6 +789,61 @@ export default function AddExpense() {
             >
               Done
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Category Picker Modal */}
+      {showCategoryPicker && (
+        <div
+          onClick={() => setShowCategoryPicker(false)}
+          className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-[var(--color-bg)] w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl animate-slide-up shadow-[var(--shadow-xl)] max-h-[80vh] overflow-auto"
+          >
+            {/* Header */}
+            <div className="sticky top-0 bg-[var(--color-bg)] border-b border-[var(--color-border-subtle)] px-6 py-4 z-10">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
+                  Select Category
+                </h2>
+                <button
+                  onClick={() => setShowCategoryPicker(false)}
+                  className="w-8 h-8 rounded-full hover:bg-[var(--color-surface)] flex items-center justify-center transition-colors"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Categories Grid */}
+            <div className="p-6 grid grid-cols-2 gap-3">
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => {
+                    setCategory(cat.id);
+                    setShowCategoryPicker(false);
+                  }}
+                  className={`p-4 rounded-2xl border-2 transition-all ${
+                    category === cat.id
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent)]/10'
+                      : 'border-[var(--color-border)] hover:border-[var(--color-border-hover)] bg-[var(--color-surface)]'
+                  }`}
+                >
+                  <div className="flex flex-col items-center gap-2 text-center">
+                    <span className="text-4xl">{cat.icon}</span>
+                    <span className="text-sm font-medium text-[var(--color-text-primary)]">
+                      {cat.name}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

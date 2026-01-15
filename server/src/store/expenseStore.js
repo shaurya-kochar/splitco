@@ -3,7 +3,7 @@
 
 const expenses = new Map();
 
-export function createExpense({ groupId, amount, paidBy, paidByData, description }) {
+export function createExpense({ groupId, amount, paidBy, paidByData, description, category, recurringData }) {
   const id = crypto.randomUUID();
   const expense = {
     id,
@@ -12,6 +12,8 @@ export function createExpense({ groupId, amount, paidBy, paidByData, description
     paidBy,
     paidByData: paidByData || null, // Store payment mode data
     description: description || null,
+    category: category || null,
+    recurringData: recurringData || null, // Store recurring settings
     createdAt: new Date().toISOString()
   };
   

@@ -440,7 +440,7 @@ router.post('/direct', authMiddleware, (req, res) => {
 router.post('/:groupId/expenses', authMiddleware, (req, res) => {
   try {
     const { groupId } = req.params;
-    const { amount, description, splits, paidBy } = req.body;
+    const { amount, description, splits, paidBy, category, recurring } = req.body;
     const userId = req.user.id;
 
     // Validate group exists
@@ -531,7 +531,13 @@ router.post('/:groupId/expenses', authMiddleware, (req, res) => {
       amount,
       paidBy: paidByUserId,
       paidByData: JSON.stringify(paidByData), // Store full payment data
-      description: description?.trim() || null
+      description: description?.trim() || null,
+      category: category || null,
+      recurringData: recurring ? {
+        frequency: recurring.frequency,
+        nextDueDate: recurring.startDate || new Date().toISOString(),
+        lastCreated: null
+      } : null
     });
 
     // Create splits

@@ -8,4 +8,4 @@
 # Logging and testing
 logs/
 *.log
-test-transitivity.js
+test-*.js
